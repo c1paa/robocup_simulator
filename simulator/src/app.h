@@ -89,7 +89,7 @@ private:
     // Manual robot drive (arrow keys) — independent of gRPC SendCommand.
     // Only sent on press/release edges so it doesn't fight an active gRPC
     // client by re-issuing a command every frame.
-    float m_manualDriveSpeed = 2.0f;
+    float m_manualDriveSpeed = 4.0f;
     float m_lastManualDrive = 0.0f;
     float m_lastManualTurn  = 0.0f;
 };
