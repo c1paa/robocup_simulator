@@ -19,6 +19,10 @@ Ranked by what's most load-bearing for the project's actual purpose (feeding vis
 robot-control client) — do this roughly top to bottom, but treat it as a starting point to
 argue with, not a mandate.
 
+Items 1 and 2 have a full implementation plan in
+[`docs/tasks/mirror-camera-vision.md`](docs/tasks/mirror-camera-vision.md) — read that before
+starting either.
+
 1. **gRPC server** (`GrpcServer` / `grpc_server.cpp`) — `start()`/`stop()`/`update()` only log
    to stdout. `proto/simulator.proto` already defines `SensorStream` (stream camera image +
    pose to client) and `SendCommand` (drive robot from client). CMake already links gRPC and
