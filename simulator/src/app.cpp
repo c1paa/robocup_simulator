@@ -269,6 +269,23 @@ void App::handleKeyboardInput(const Uint8* keys, float dt)
     if (keys[SDL_SCANCODE_S]) m_lookTarget -= forward * speed;
     if (keys[SDL_SCANCODE_A]) m_lookTarget -= right * speed;
     if (keys[SDL_SCANCODE_D]) m_lookTarget += right * speed;
+
+    // Arrow keys drive the robot directly (manual testing, independent of
+    // gRPC SendCommand). Only send a new target on press/release edges so
+    // this doesn't stomp on commands an active gRPC client is sending.
+    float drive = 0.0f, turn = 0.0f;
+    if (keys[SDL_SCANCODE_UP])    drive += 1.0f;
+    if (keys[SDL_SCANCODE_DOWN])  drive -= 1.0f;
+    if (keys[SDL_SCANCODE_LEFT])  turn  -= 1.0f;
+    if (keys[SDL_SCANCODE_RIGHT]) turn  += 1.0f;
+
+    if (m_robot && (drive != m_lastManualDrive || turn != m_lastManualTurn)) {
+        float left  = (drive - turn) * m_manualDriveSpeed;
+        float right2 = (drive + turn) * m_manualDriveSpeed;
+        m_robot->setWheelVelocities(left, right2);
+        m_lastManualDrive = drive;
+        m_lastManualTurn  = turn;
+    }
 }
 
 void App::update(float dt)

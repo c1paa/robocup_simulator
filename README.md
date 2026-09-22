@@ -47,6 +47,8 @@ Builds automatically first if the binary is missing. Options:
 - Right mouse drag — orbit
 - Scroll — pan (hold Shift to orbit, Cmd to zoom)
 - WASD — pan the look target
+- Arrow keys — drive the robot directly (forward/back/turn), independent of
+  gRPC `SendCommand` — handy for trying it out without a Python client
 - C — toggle the in-window mirror-camera preview overlay
 - Esc — quit
 
