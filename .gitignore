@@ -1,0 +1,9 @@
+# Build output
+simulator/build/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+
+# macOS
+.DS_Store

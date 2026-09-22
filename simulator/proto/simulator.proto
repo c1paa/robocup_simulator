@@ -1,0 +1,60 @@
+syntax = "proto3";
+
+package robocup;
+
+service Simulator {
+    // Client subscribes to sensor stream from simulator
+    rpc SensorStream(SensorRequest) returns (stream SensorData);
+
+    // Client sends control commands to simulator
+    rpc SendCommand(stream RobotCommand) returns (CommandResponse);
+}
+
+message SensorRequest {
+    int32 robot_id = 1;
+}
+
+message SensorData {
+    int32 robot_id = 1;
+
+    // Camera image (raw RGB bytes)
+    int32 image_width = 2;
+    int32 image_height = 3;
+    bytes image_data = 4;
+
+    // Position (meters)
+    float pos_x = 5;
+    float pos_y = 6;
+    float pos_z = 7;
+
+    // Orientation (radians)
+    float yaw = 8;
+
+    // Wheel velocities
+    float velocity = 9;
+    float angular_velocity = 10;
+
+    // Timestamp
+    double timestamp = 11;
+}
+
+message RobotCommand {
+    int32 robot_id = 1;
+
+    // Wheel velocities (-1.0 to 1.0, normalized)
+    float left_wheel = 2;
+    float right_wheel = 3;
+
+    // Kicker
+    float kick_power = 4;    // 0.0 to 1.0
+
+    // Dribbler
+    float dribble_speed = 5; // -1.0 to 1.0
+
+    double timestamp = 6;
+}
+
+message CommandResponse {
+    bool success = 1;
+    string message = 2;
+}

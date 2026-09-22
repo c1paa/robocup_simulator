@@ -1,0 +1,39 @@
+{
+    "robot": {
+        "diameter": 180,
+        "height": 150,
+        "wheels": {
+            "count": 3,
+            "center_diameter": 160,
+            "wheel_diameter": 48
+        },
+        "mirror": {
+            "base_height": 150,
+            "cone_height": 40,
+            "base_diameter": 170
+        },
+        "camera": {
+            "height": 90
+        },
+        "motor": {
+            "max_speed": 3000,
+            "time_constant": 0.05,
+            "slip": 0.05
+        },
+        "kicker": {
+            "max_power": 8.0,
+            "charge_time": 0.2
+        },
+        "dribbler": {
+            "max_speed": 1000.0,
+            "radius": 10
+        }
+    },
+    "camera": {
+        "width": 640,
+        "height": 480,
+        "fov": 120.0,
+        "noise_std": 0.02,
+        "pixel_noise": 0.01
+    }
+}
