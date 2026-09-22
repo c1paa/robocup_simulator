@@ -35,10 +35,11 @@ for how they were implemented.
 
 4. **Robot ↔ physics integration** — `Robot::update()` moves the robot by directly integrating
    position/yaw; the Bullet world only has a ground plane and never knows the robot exists, so
-   there's no collision between the robot, field walls, or a future ball. Decide explicitly
-   whether the robot stays kinematic (simpler, deterministic, easier to match real robot specs)
-   or becomes a real rigid body (needed for physical collisions) — don't let this drift
-   silently once a ball exists.
+   there's no collision between the robot, field walls, or a future ball. Decided: the robot
+   becomes a real Bullet rigid body driven by a 3-omni-wheel friction/slip model (not kinematic).
+   Full plan: [`docs/tasks/omni-wheel-dynamics.md`](docs/tasks/omni-wheel-dynamics.md) — this
+   also changes `RobotCommand` (body-frame `vx`/`vy`/`omega` instead of `left_wheel`/
+   `right_wheel`) and adds a separately-drifting odometry estimate to `SensorData`.
 
 5. **Kicker / dribbler** — `Robot::kick()` and `Robot::dribble()` are no-ops. Proto already
    carries `kick_power`/`dribble_speed`. Needs an actual effect once there's a ball to act on.
