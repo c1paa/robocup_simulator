@@ -53,8 +53,10 @@ bool App::init(const std::string& configDir)
     m_physics->init(cfg);
     m_field->init(cfg);
     m_robot->init(cfg);
-    m_camera->init(cfg);
+    m_camera->init(cfg, m_robot->mirrorProfile(), m_robot->cameraHeight(), m_renderer.get());
     m_renderer->init(m_width, m_height);
+    m_grpc->setRobot(m_robot.get());
+    m_grpc->setCamera(m_camera.get());
     m_grpc->start();
 
     std::cout << "[App] Simulator ready." << std::endl;
@@ -64,6 +66,7 @@ bool App::init(const std::string& configDir)
 void App::shutdown()
 {
     if (m_grpc)     m_grpc->stop();
+    if (m_camera)   m_camera->shutdown();
     if (m_renderer) m_renderer->shutdown();
     if (m_glContext) SDL_GL_DeleteContext(m_glContext);
     if (m_window)    SDL_DestroyWindow(m_window);
@@ -199,6 +202,9 @@ void App::handleEvent(const SDL_Event& e)
             e.key.keysym.scancode == SDL_SCANCODE_RGUI) {
             m_cmdHeld = true;
         }
+        if (e.key.keysym.scancode == SDL_SCANCODE_C) {
+            m_showCameraPreview = !m_showCameraPreview;
+        }
         break;
     case SDL_KEYUP:
         if (e.key.keysym.scancode == SDL_SCANCODE_LSHIFT ||
@@ -274,6 +280,14 @@ void App::update(float dt)
 
 void App::render()
 {
+    // ---- Robot mirror-camera pass (offscreen) ----
+    m_camera->renderView(m_robot->position(), m_robot->orientation(),
+        [&](Renderer& r) {
+            m_field->render(r);
+            m_robot->renderBody(r);
+        });
+    glViewport(0, 0, m_width, m_height);
+
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
     // Build viewer camera matrices
@@ -300,6 +314,12 @@ void App::render()
     }
 
     m_renderer->endFrame();
+
+    // ---- Camera preview overlay ----
+    if (m_showCameraPreview) {
+        glViewport(0, 0, m_width, m_height);
+        m_camera->drawPreview(m_width, m_height);
+    }
 }
 
 glm::vec3 App::cameraPosition() const

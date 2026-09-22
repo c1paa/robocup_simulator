@@ -17,10 +17,8 @@ void Robot::init(Config& cfg)
     m_wheelCenterDiameter = cfg.getFloat("/robot/wheels/center_diameter", 150.0f) / MM;
     m_wheelDiameter       = cfg.getFloat("/robot/wheels/wheel_diameter",  70.0f)  / MM;
 
-    // Mirror
-    m_mirrorBaseHeight   = cfg.getFloat("/robot/mirror/base_height",   150.0f) / MM;
-    m_mirrorHeight       = cfg.getFloat("/robot/mirror/cone_height",   40.0f)  / MM;
-    m_mirrorBaseDiameter = cfg.getFloat("/robot/mirror/base_diameter", 80.0f)  / MM;
+    // Mirror (single source of truth for mirror geometry)
+    m_mirror.loadFromConfig(cfg);
 
     // Camera
     m_cameraHeight = cfg.getFloat("/robot/camera/height", 110.0f) / MM;
@@ -81,6 +79,39 @@ void Robot::update(float dt)
 
 void Robot::render(Renderer& renderer)
 {
+    renderBody(renderer);
+
+    // ---- Mirror (cone or hyperbola placeholder, apex down toward camera) ----
+    {
+        float mirrorHeight = m_mirror.mirrorHeight();
+        float baseHeight   = m_mirror.baseHeight();
+        float baseRadius   = m_mirror.baseRadius();
+        float bodyHalf = m_height * 0.5f;
+        float apexY = baseHeight - mirrorHeight;
+        float mirrorCenterY = (baseHeight + apexY) * 0.5f;
+        float mirrorLocalY = mirrorCenterY - bodyHalf;
+        glm::mat4 mirrorLocal = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, mirrorLocalY, 0.0f));
+        glm::mat4 model = glm::translate(glm::mat4(1.0f), m_position);
+        model = glm::rotate(model, m_yaw, glm::vec3(0.0f, 1.0f, 0.0f));
+        glm::mat4 mirrorModel = model * mirrorLocal;
+        // Hyperbola is drawn as the same bounding cone as a visual placeholder.
+        renderer.drawCone(baseRadius, mirrorHeight, mirrorModel, m_mirrorColor);
+    }
+
+    // ---- Camera indicator ----
+    {
+        float bodyHalf = m_height * 0.5f;
+        float camLocalY = m_cameraHeight - bodyHalf;
+        glm::mat4 model = glm::translate(glm::mat4(1.0f), m_position);
+        model = glm::rotate(model, m_yaw, glm::vec3(0.0f, 1.0f, 0.0f));
+        glm::mat4 camLocal = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, camLocalY, 0.0f));
+        glm::mat4 camModel = model * camLocal;
+        renderer.drawSphere(0.015f, camModel, glm::vec3(1.0f, 0.2f, 0.2f));
+    }
+}
+
+void Robot::renderBody(Renderer& renderer)
+{
     float radius = m_diameter * 0.5f;
     float wheelRadius = m_wheelDiameter * 0.5f;
     float wheelCenterDist = m_wheelCenterDiameter * 0.5f;
@@ -121,23 +152,5 @@ void Robot::render(Renderer& renderer)
         // Combine with robot world transform
         glm::mat4 wheelModel = model * wheelLocal;
         renderer.drawCylinder(wheelRadius, 0.01f, wheelModel, m_wheelColor);
-    }
-
-    // ---- Mirror (cone, apex down toward camera) ----
-    {
-        float apexY = m_mirrorBaseHeight - m_mirrorHeight;
-        float mirrorCenterY = (m_mirrorBaseHeight + apexY) * 0.5f;
-        float mirrorLocalY = mirrorCenterY - bodyHalf;
-        glm::mat4 mirrorLocal = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, mirrorLocalY, 0.0f));
-        glm::mat4 mirrorModel = model * mirrorLocal;
-        renderer.drawCone(m_mirrorBaseDiameter * 0.5f, m_mirrorHeight, mirrorModel, m_mirrorColor);
-    }
-
-    // ---- Camera indicator ----
-    {
-        float camLocalY = m_cameraHeight - bodyHalf;
-        glm::mat4 camLocal = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, camLocalY, 0.0f));
-        glm::mat4 camModel = model * camLocal;
-        renderer.drawSphere(0.015f, camModel, glm::vec3(1.0f, 0.2f, 0.2f));
     }
 }

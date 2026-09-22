@@ -1,18 +1,89 @@
 #include "grpc_server.h"
+#include "simulator_service.h"
+#include "config.h"
+#include "robot.h"
+#include "camera.h"
+
+#include <grpcpp/grpcpp.h>
 #include <iostream>
+#include <chrono>
+
+GrpcServer::GrpcServer() = default;
+
+GrpcServer::~GrpcServer()
+{
+    stop();
+}
 
 void GrpcServer::start()
 {
-    std::cout << "[gRPC] Server placeholder. Will start on localhost:50051" << std::endl;
+    int port = Config::instance().getInt("/network/grpc_port", 50051);
+    std::string addr = "0.0.0.0:" + std::to_string(port);
+
+    grpc::ServerBuilder builder;
+    builder.AddListeningPort(addr, grpc::InsecureServerCredentials());
+
+    m_service = std::make_unique<SimulatorServiceImpl>(m_state);
+    builder.RegisterService(m_service.get());
+
+    m_server = builder.BuildAndStart();
+    if (!m_server) {
+        std::cerr << "[gRPC] Failed to start server on " << addr << std::endl;
+        return;
+    }
+
+    std::cout << "[gRPC] Listening on " << addr << std::endl;
+    m_thread = std::thread([this]() { m_server->Wait(); });
 }
 
 void GrpcServer::stop()
 {
-    std::cout << "[gRPC] Server stopped." << std::endl;
+    {
+        std::lock_guard<std::mutex> lock(m_state.mtx);
+        m_state.shutdown = true;
+        m_state.cv.notify_all();
+    }
+    if (m_server) m_server->Shutdown();
+    if (m_thread.joinable()) m_thread.join();
+    m_server.reset();
+    m_service.reset();
 }
 
 void GrpcServer::update(float dt)
 {
     (void)dt;
-    // Placeholder: process incoming gRPC commands, send sensor data
+
+    // Consume any pending drive command under the same mutex the gRPC thread
+    // uses, so the command application stays race-free.
+    {
+        std::lock_guard<std::mutex> lock(m_state.mtx);
+        if (m_state.hasCommand && m_robot) {
+            m_robot->setWheelVelocities(m_state.leftWheel, m_state.rightWheel);
+            if (m_state.kickPower > 0.0f) m_robot->kick(m_state.kickPower);
+            m_robot->dribble(m_state.dribbleSpeed);
+            m_state.hasCommand = false;
+        }
+    }
+
+    // Publish the latest sensor state and signal waiting SensorStream RPCs
+    // only when the camera actually rendered a new image this tick — camera
+    // updates are throttled to /camera/stream_fps, well below the main loop
+    // rate, and re-publishing the same bytes under a new frameId would just
+    // make SensorStream send duplicate frames.
+    if (m_camera && m_camera->frameChanged()) {
+        std::lock_guard<std::mutex> lock(m_state.mtx);
+        m_state.image  = m_camera->imageData();
+        m_state.width  = m_camera->imageWidth();
+        m_state.height = m_camera->imageHeight();
+        if (m_robot) {
+            m_state.position        = m_robot->position();
+            m_state.yaw             = m_robot->orientation();
+            m_state.velocity        = m_robot->velocity();
+            m_state.angularVelocity = m_robot->angularVelocity();
+        }
+        m_state.timestamp = std::chrono::duration<double>(
+            std::chrono::steady_clock::now().time_since_epoch()).count();
+        m_state.frameId++;
+        m_state.cv.notify_all();
+    }
 }

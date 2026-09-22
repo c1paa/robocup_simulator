@@ -84,4 +84,5 @@ private:
 
     bool m_showGrid = true;
     bool m_showPhysicsDebug = false;
+    bool m_showCameraPreview = false;
 };

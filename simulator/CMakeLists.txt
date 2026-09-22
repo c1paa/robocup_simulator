@@ -84,8 +84,10 @@ set(SOURCES
     src/field.cpp
     src/robot.cpp
     src/camera.cpp
+    src/mirror_profile.cpp
     src/config.cpp
     src/grpc_server.cpp
+    src/simulator_service.cpp
 )
 
 set(GENERATED_SOURCES

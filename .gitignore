@@ -5,5 +5,12 @@ CMakeCache.txt
 cmake_install.cmake
 Makefile
 
+# Generated Python gRPC stubs
+python/generated/
+python/__pycache__/
+
+# Python virtualenv
+.venv/
+
 # macOS
 .DS_Store

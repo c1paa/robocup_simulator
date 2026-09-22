@@ -8,9 +8,12 @@
             "wheel_diameter": 48
         },
         "mirror": {
+            "type": "cone",
             "base_height": 150,
+            "base_diameter": 170,
             "cone_height": 40,
-            "base_diameter": 170
+            "hyperbola_a": 35,
+            "hyperbola_b": 40
         },
         "camera": {
             "height": 90
@@ -34,6 +37,8 @@
         "height": 480,
         "fov": 120.0,
         "noise_std": 0.02,
-        "pixel_noise": 0.01
+        "pixel_noise": 0.01,
+        "cubemap_resolution": 256,
+        "stream_fps": 30
     }
 }

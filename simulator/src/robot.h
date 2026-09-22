@@ -1,6 +1,7 @@
 #pragma once
 
 #include "common.h"
+#include "mirror_profile.h"
 
 class Config;
 class Renderer;
@@ -11,6 +12,7 @@ public:
     void init(Config& cfg);
     void update(float dt);
     void render(Renderer& renderer);
+    void renderBody(Renderer& renderer); // body + wheels only (no mirror/camera)
 
     // gRPC-to-robot commands
     void setWheelVelocities(float left, float right);
@@ -20,6 +22,12 @@ public:
     // Robot state (for gRPC)
     glm::vec3 position() const { return m_position; }
     float orientation() const { return m_yaw; }
+    float velocity() const { return m_velocity; }
+    float angularVelocity() const { return m_angularVelocity; }
+
+    // Mirror / camera geometry (single source of truth for mirror shape)
+    const MirrorProfile& mirrorProfile() const { return m_mirror; }
+    float cameraHeight() const { return m_cameraHeight; }
 
 private:
     // Position in world
@@ -46,10 +54,8 @@ private:
     float m_motorTimeConstant = 0.05f;
     float m_wheelSlip         = 0.05f;
 
-    // ---- Mirror (cone, apex down toward camera) ----
-    float m_mirrorBaseHeight   = 0.15f;  // Y of the base (top)
-    float m_mirrorHeight       = 0.04f;  // cone height
-    float m_mirrorBaseDiameter = 0.08f;  // base diameter
+    // ---- Mirror (cone or hyperbola, apex down toward camera) ----
+    MirrorProfile m_mirror;
 
     // ---- Camera (looks up into mirror) ----
     float m_cameraHeight = 0.11f;

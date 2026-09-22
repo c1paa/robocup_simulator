@@ -3,6 +3,9 @@
         "name": "default",
         "version": "1.0"
     },
+    "network": {
+        "grpc_port": 50051
+    },
     "viewer": {
         "pan_sensitivity": 0.7,
         "orbit_sensitivity": 3.5,

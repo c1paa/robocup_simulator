@@ -12,6 +12,10 @@ for humans and AI agents alike.
   cylinder+wheels+mirror rendering (`Robot`)
 - Bullet physics world with a ground plane (`Physics`) — nothing else is in it yet
 - Config loading from JSON with dot-path lookup and mm→m conversion (`Config`)
+- gRPC server (`GrpcServer` + `SimulatorServiceImpl`): `SensorStream` (camera image + pose)
+  and `SendCommand` (drive commands) over `localhost:<grpc_port>`
+- Real catadioptric mirror-camera rendering (`Camera` + `MirrorProfile`): cubemap capture +
+  baked direction LUT → real, mirror-distorted image, streamed to clients
 
 ## Stubbed / not implemented
 
@@ -19,21 +23,11 @@ Ranked by what's most load-bearing for the project's actual purpose (feeding vis
 robot-control client) — do this roughly top to bottom, but treat it as a starting point to
 argue with, not a mandate.
 
-Items 1 and 2 have a full implementation plan in
-[`docs/tasks/mirror-camera-vision.md`](docs/tasks/mirror-camera-vision.md) — read that before
-starting either.
+Items 1 and 2 are **done** — see [`docs/tasks/mirror-camera-vision.md`](docs/tasks/mirror-camera-vision.md)
+for how they were implemented.
 
-1. **gRPC server** (`GrpcServer` / `grpc_server.cpp`) — `start()`/`stop()`/`update()` only log
-   to stdout. `proto/simulator.proto` already defines `SensorStream` (stream camera image +
-   pose to client) and `SendCommand` (drive robot from client). CMake already links gRPC and
-   generates the protobuf/grpc stubs. Nothing implements `Simulator::Service` yet — this is
-   the actual external interface of the simulator and currently does nothing.
-
-2. **Real mirror-camera rendering** (`Camera::update()`) — currently fills the image buffer
-   with a synthetic noise pattern, ignores `robotPos`/`robotYaw` entirely. Needs to render the
-   scene from the robot's camera position through the catadioptric mirror (`Camera::Mirror`:
-   `a`, `b`, `radius` are already loaded from config) into `m_fbo`/`m_renderTexture`, then read
-   the pixels back into `m_imageData`. This is what `SensorStream` is supposed to send.
+1. ~~gRPC server~~ — done (see above).
+2. ~~Real mirror-camera rendering~~ — done (see above).
 
 3. **Ball** — there is no ball anywhere in the codebase (`Physics`, `Field`, `Robot`). Configs
    already carry `physics.ball` (radius/mass/friction/restitution) unused. Needs a `Ball` type
@@ -59,9 +53,10 @@ starting either.
 
 ## Not urgent
 
-- Extract the inline GLSL strings in `renderer.cpp` into `simulator/shaders/*.glsl` if shader
-  code grows enough to be worth the indirection. The `shaders/` directory exists for this but
-  is currently unused — don't add files there speculatively.
+- Extract the inline GLSL strings in `renderer.cpp` and `camera.cpp` into
+  `simulator/shaders/*.glsl` if shader code grows enough to be worth the indirection. The
+  `shaders/` directory exists for this but is currently unused — don't add files there
+  speculatively.
 - `simulator/lib/` is currently empty and unused; only populate it if a dependency actually
   needs to be vendored.
 - Confirm Linux build path (CMake has a non-Apple OpenGL branch that's never been exercised).

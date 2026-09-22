@@ -47,19 +47,41 @@ Builds automatically first if the binary is missing. Options:
 - Right mouse drag — orbit
 - Scroll — pan (hold Shift to orbit, Cmd to zoom)
 - WASD — pan the look target
+- C — toggle the in-window mirror-camera preview overlay
 - Esc — quit
+
+## Python client
+
+A minimal OpenCV client streams the robot's mirror-camera feed over gRPC:
+
+```bash
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r python/requirements.txt
+bash python/generate_proto.sh          # once, regenerates python/generated/
+```
+
+Then, while the simulator is running:
+
+```bash
+python python/viewer.py                # optional: pass a different port
+```
+
+Press `q` or close the window to quit. `python/generated/` is generated code and
+is git-ignored (same as `simulator/build/`).
 
 ## Project layout
 
 ```
 simulator/
-  src/        C++ source (App, Renderer, Physics, Field, Robot, Camera, GrpcServer, Config)
+  src/        C++ source (App, Renderer, Physics, Field, Robot, Camera, MirrorProfile,
+              GrpcServer, SimulatorServiceImpl, Config)
   proto/      simulator.proto — gRPC service definition (SensorStream / SendCommand)
-  configs/    project.json (field/physics/viewer), robot.json (robot/camera params)
-  shaders/    reserved for GLSL files if shader source is ever pulled out of renderer.cpp
+  configs/    project.json (field/physics/viewer/network), robot.json (robot/mirror/camera)
+  shaders/    reserved for GLSL files if shader source is ever pulled out of renderer.cpp/camera.cpp
   lib/        reserved for vendored libraries, currently unused
   setup.sh    one-time dependency install + build
   build.sh    incremental CMake build
+python/       Python/OpenCV demo client for the gRPC camera stream (see "Python client" above)
 run_simulator.sh   generated launcher (created by setup.sh)
 ```
 
@@ -75,6 +97,7 @@ config through `Config::getFloat/getInt/getString` and convert immediately.
 
 ## Current status
 
-This is a work in progress. The viewer, field rendering, and basic robot kinematics work; the
-gRPC interface and the actual mirror-camera image are still placeholders. Full breakdown and
-priorities are in [`ROADMAP.md`](ROADMAP.md).
+This is a work in progress. The viewer, field rendering, basic robot kinematics, the real
+mirror-camera image, and the gRPC interface (`SensorStream`/`SendCommand`) all work. There's
+still no ball, the robot isn't hooked into Bullet physics, and only one robot is supported.
+Full breakdown and priorities are in [`ROADMAP.md`](ROADMAP.md).

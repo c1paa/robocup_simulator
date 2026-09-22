@@ -6,9 +6,10 @@ fixed once.
 
 ## Before you start
 
-- Read [`ROADMAP.md`](ROADMAP.md) to see what's an intentional stub vs. a bug. A lot of things
-  that look unfinished (the gRPC server, the camera image, the missing ball) are *known* and
-  tracked there, not something to silently "fix" as a side effect of an unrelated task.
+- Read [`ROADMAP.md`](ROADMAP.md) to see what's an intentional stub vs. a bug. Things that look
+  unfinished (currently: the missing ball, robot not hooked into Bullet physics, kicker/dribbler,
+  single-robot-only) are *known* and tracked there, not something to silently "fix" as a side
+  effect of an unrelated task.
 - `git pull` (or `git pull --rebase`) before starting work in a fresh session — see
   [`CONTRIBUTING.md`](CONTRIBUTING.md) for the workflow.
 - If you're about to build, run `bash simulator/setup.sh` once per machine, then
@@ -21,8 +22,9 @@ fixed once.
 simulator/src/       C++ source, one class per .h/.cpp pair
 simulator/proto/     gRPC service definition — the external contract with client code
 simulator/configs/   project.json, robot.json — runtime-tunable parameters
-simulator/shaders/   reserved, currently unused (shaders are inline in renderer.cpp)
+simulator/shaders/   reserved, currently unused (shaders are inline in renderer.cpp/camera.cpp)
 simulator/lib/       reserved, currently unused
+python/               Python/OpenCV demo client for the gRPC camera stream
 ```
 
 Class responsibilities (see their headers for the exact interface):
@@ -31,9 +33,15 @@ Class responsibilities (see their headers for the exact interface):
 - `Renderer` — thin immediate-mode-style OpenGL wrapper (grid/line/box/sphere/cylinder/cone).
 - `Physics` — Bullet world lifecycle.
 - `Field` — field geometry and rendering, driven entirely by config.
-- `Robot` — single robot's kinematics, geometry, and rendering.
-- `Camera` — the robot's own (mirror) camera, separate from the viewer camera in `App`.
-- `GrpcServer` — external control/sensor interface (currently a stub, see `ROADMAP.md`).
+- `Robot` — single robot's kinematics, geometry, and rendering; owns the `MirrorProfile`.
+- `MirrorProfile` — mirror shape (`cone`/`hyperbola`) as a profile function `r = f(h)`; the
+  single source of truth for mirror geometry, used both for the drawn mesh (`Robot`) and the
+  optics (`Camera`). See [`docs/tasks/mirror-camera-vision.md`](docs/tasks/mirror-camera-vision.md).
+- `Camera` — the robot's own (mirror) camera: cubemap capture + baked direction LUT →
+  real mirror-distorted image, plus the in-window preview overlay. Separate from the viewer
+  camera in `App`.
+- `GrpcServer` / `SimulatorServiceImpl` — real gRPC server (`SensorStream`/`SendCommand`),
+  bridged to the sim thread via the mutex-guarded `SharedState` (`shared_state.h`).
 - `Config` — JSON config singleton, dot-path lookup (`cfg.getFloat("/robot/diameter", ...)`).
 
 ## Conventions to keep consistent
