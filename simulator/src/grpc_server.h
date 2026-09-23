@@ -8,6 +8,7 @@ namespace grpc { class Server; }
 
 class Robot;
 class Camera;
+class LidarSensor;
 class SimulatorServiceImpl;
 
 class GrpcServer
@@ -22,6 +23,7 @@ public:
 
     void setRobot(Robot* robot) { m_robot = robot; }
     void setCamera(Camera* camera) { m_camera = camera; }
+    void setLidar(LidarSensor* lidar) { m_lidar = lidar; }
 
 private:
     SharedState m_state;
@@ -30,4 +32,5 @@ private:
     std::unique_ptr<SimulatorServiceImpl> m_service;
     Robot* m_robot = nullptr;
     Camera* m_camera = nullptr;
+    LidarSensor* m_lidar = nullptr;
 };

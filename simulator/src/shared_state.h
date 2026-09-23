@@ -1,6 +1,7 @@
 #pragma once
 
 #include "common.h"
+#include "lidar_sensor.h"
 #include <mutex>
 #include <condition_variable>
 #include <cstdint>
@@ -31,6 +32,9 @@ struct SharedState
     float odomX = 0.0f;
     float odomZ = 0.0f;
     float odomYaw = 0.0f;
+
+    // Latest completed lidar scan (robot body frame)
+    std::vector<LidarPoint> lidarPoints;
 
     // Pending command (written by gRPC handler, consumed by sim thread)
     bool hasCommand = false;

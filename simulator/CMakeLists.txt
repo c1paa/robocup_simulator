@@ -84,6 +84,7 @@ set(SOURCES
     src/field.cpp
     src/robot.cpp
     src/camera.cpp
+    src/lidar_sensor.cpp
     src/mirror_profile.cpp
     src/config.cpp
     src/grpc_server.cpp

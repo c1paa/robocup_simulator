@@ -41,6 +41,15 @@ message SensorData {
     float odom_x = 12;
     float odom_z = 13;
     float odom_yaw = 14;
+
+    // Latest completed lidar scan (robot body frame)
+    repeated LidarPoint lidar_points = 15;
+}
+
+message LidarPoint {
+    float angle = 1;     // radians, robot body frame, 0 = forward (+X)
+    float distance = 2;  // meters
+    float intensity = 3; // 0.0-1.0, synthetic confidence value
 }
 
 message RobotCommand {

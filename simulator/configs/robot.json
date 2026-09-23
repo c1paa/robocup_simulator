@@ -25,6 +25,15 @@
         "camera": {
             "height": 90
         },
+        "lidar": {
+            "height": 170,
+            "min_range": 20,
+            "max_range": 12000,
+            "points_per_scan": 450,
+            "scan_frequency": 10.0,
+            "range_noise_std": 15,
+            "dropout_probability": 0.01
+        },
         "motor": {
             "max_linear_speed": 3000,
             "max_angular_speed": 6.28,

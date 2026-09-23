@@ -24,7 +24,8 @@ simulator/proto/     gRPC service definition — the external contract with clie
 simulator/configs/   project.json, robot.json — runtime-tunable parameters
 simulator/shaders/   reserved, currently unused (shaders are inline in renderer.cpp/camera.cpp)
 simulator/lib/       reserved, currently unused
-python/               Python/OpenCV demo client for the gRPC camera stream
+python/               Python/OpenCV demo client (`viewer.py`) + hardware-abstraction seed
+                      (`robot_hal.py`, the `SimRobotHAL` gRPC wrapper)
 ```
 
 Class responsibilities (see their headers for the exact interface):
@@ -41,6 +42,10 @@ Class responsibilities (see their headers for the exact interface):
 - `Camera` — the robot's own (mirror) camera: cubemap capture + baked direction LUT →
   real mirror-distorted image, plus the in-window preview overlay. Separate from the viewer
   camera in `App`.
+- `LidarSensor` — LD06-like 360° 2D scanning lidar: a Bullet raycast sweep (paced by its own
+  `scan_frequency`, independent of the render/physics tick) with range/noise/dropout matched to
+  the real sensor; publishes the latest completed scan over gRPC. Depends on the static
+  field-boundary wall boxes added by `Physics`.
 - `GrpcServer` / `SimulatorServiceImpl` — real gRPC server (`SensorStream`/`SendCommand`),
   bridged to the sim thread via the mutex-guarded `SharedState` (`shared_state.h`).
 - `Config` — JSON config singleton, dot-path lookup (`cfg.getFloat("/robot/diameter", ...)`).

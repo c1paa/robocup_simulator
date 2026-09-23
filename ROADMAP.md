@@ -25,9 +25,9 @@ Ranked by what's most load-bearing for the project's actual purpose (feeding vis
 robot-control client) — do this roughly top to bottom, but treat it as a starting point to
 argue with, not a mandate.
 
-Items 1, 2 and 4 are **done** — see [`docs/tasks/mirror-camera-vision.md`](docs/tasks/mirror-camera-vision.md)
-(items 1–2) and [`docs/tasks/omni-wheel-dynamics.md`](docs/tasks/omni-wheel-dynamics.md) (item 4)
-for how they were implemented.
+Items 1, 2, 4 and 8 are **done** — see [`docs/tasks/mirror-camera-vision.md`](docs/tasks/mirror-camera-vision.md)
+(items 1–2), [`docs/tasks/omni-wheel-dynamics.md`](docs/tasks/omni-wheel-dynamics.md) (item 4) and
+[`docs/tasks/lidar-sensor.md`](docs/tasks/lidar-sensor.md) (item 8) for how they were implemented.
 
 1. ~~gRPC server~~ — done (see above).
 2. ~~Real mirror-camera rendering~~ — done (see above).
@@ -52,7 +52,15 @@ for how they were implemented.
 
 7. **Field collision** — walls/goals are drawn (`Field::render`) but have no Bullet collision
    shapes, so nothing currently stops the robot or a future ball from leaving the field.
-   (Unaffected by item 4 — still open.)
+   The four boundary walls now have static collision boxes (raycast targets only — see item 8),
+   but full collision *response* for the robot/ball is still open.
+
+8. ~~LiDAR sensor + Python hardware-abstraction seed~~ — done: an LD06-like 360° 2D scanning
+   lidar (`LidarSensor`, Bullet raycast sweep with range/rate/noise/dropout matched to the real
+   sensor) streamed over gRPC via `SensorData.lidar_points`, plus a `python/robot_hal.py`
+   (`SimRobotHAL`) wrapping all sensor/command access. Added static raycast-only collision boxes
+   for the four field boundary walls (a slice of item 7) as the lidar target. See
+   [`docs/tasks/lidar-sensor.md`](docs/tasks/lidar-sensor.md).
 
 ## Not urgent
 

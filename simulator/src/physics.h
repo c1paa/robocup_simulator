@@ -2,6 +2,7 @@
 
 #include <btBulletDynamicsCommon.h>
 #include <memory>
+#include <vector>
 
 class Config;
 class Renderer;
@@ -28,4 +29,11 @@ private:
     std::unique_ptr<btDiscreteDynamicsWorld> m_world;
 
     std::unique_ptr<btRigidBody> m_groundBody;
+
+    // Four static field boundary walls. Raycast targets only (see ROADMAP item 8
+    // / the lidar task) — CF_NO_CONTACT_RESPONSE keeps them from blocking the
+    // robot, which is a tracked item-7 gap.
+    std::vector<std::unique_ptr<btBoxShape>> m_wallShapes;
+    std::vector<std::unique_ptr<btDefaultMotionState>> m_wallMotionStates;
+    std::vector<std::unique_ptr<btRigidBody>> m_wallBodies;
 };

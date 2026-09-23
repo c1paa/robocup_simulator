@@ -3,6 +3,7 @@
 #include "config.h"
 #include "robot.h"
 #include "camera.h"
+#include "lidar_sensor.h"
 
 #include <grpcpp/grpcpp.h>
 #include <iostream>
@@ -83,6 +84,9 @@ void GrpcServer::update(float dt)
             m_state.odomX           = m_robot->odometryX();
             m_state.odomZ           = m_robot->odometryZ();
             m_state.odomYaw         = m_robot->odometryYaw();
+        }
+        if (m_lidar) {
+            m_state.lidarPoints = m_lidar->latestScan();
         }
         m_state.timestamp = std::chrono::duration<double>(
             std::chrono::steady_clock::now().time_since_epoch()).count();

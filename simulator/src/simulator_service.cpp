@@ -61,6 +61,12 @@ grpc::Status SimulatorServiceImpl::SensorStream(
             data.set_odom_x(m_state.odomX);
             data.set_odom_z(m_state.odomZ);
             data.set_odom_yaw(m_state.odomYaw);
+            for (const LidarPoint& p : m_state.lidarPoints) {
+                robocup::LidarPoint* lp = data.add_lidar_points();
+                lp->set_angle(p.angle);
+                lp->set_distance(p.distance);
+                lp->set_intensity(p.intensity);
+            }
         }
         if (!writer->Write(data)) break;
     }
