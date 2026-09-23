@@ -73,6 +73,11 @@ python python/viewer.py                # optional: pass a different port
 Press `q` or close the window to quit. `python/generated/` is generated code and
 is git-ignored (same as `simulator/build/`).
 
+To write your own robot-control code against the simulator (drive commands, camera, lidar,
+dribbler, kicker, pose/odometry), see [`python/README.md`](python/README.md) — one `import
+robot_hal` gets you the whole gRPC sensor/command interface behind plain Python method calls, no
+manual gRPC/protobuf code needed.
+
 ## Project layout
 
 ```
@@ -102,7 +107,7 @@ config through `Config::getFloat/getInt/getString` and convert immediately.
 ## Current status
 
 This is a work in progress. The viewer, field rendering, the real mirror-camera image, the gRPC
-interface (`SensorStream`/`SendCommand`), and the robot's 3-omni-wheel Bullet-physics drivetrain
-(friction/slip, dead-reckoning odometry) all work. There's still no ball, no kicker/dribbler
-effect, no field-wall collision, and only one robot is supported. Full breakdown and priorities
-are in [`ROADMAP.md`](ROADMAP.md).
+interface (`SensorStream`/`SendCommand`), the robot's 3-omni-wheel Bullet-physics drivetrain
+(friction/slip, dead-reckoning odometry), the ball, dribbler/kicker, a lidar sensor, and field-wall
+collision all work. Only one robot is supported (see `ROADMAP.md` item 6 for what multi-robot would
+need). Full breakdown and priorities are in [`ROADMAP.md`](ROADMAP.md).
