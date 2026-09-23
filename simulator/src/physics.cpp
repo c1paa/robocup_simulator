@@ -22,6 +22,17 @@ void Physics::init(Config& cfg)
     float grav = cfg.getFloat("/physics/gravity", 9810.0f) / MM;
     m_world->setGravity(btVector3(0, -grav, 0));
 
+    // More solver iterations than the default (10): a robot sustaining a
+    // forward push against a ball that's pinned against a solid wall is a
+    // persistent, resisted-contact scenario the default iteration count
+    // doesn't resolve precisely enough — small per-frame error in the
+    // cylinder-vs-sphere contact normal was observed to accumulate into a
+    // steadily growing, entirely spurious yaw (robot rotating with omega=0
+    // commanded, purely from sustained contact pressure). Cheap to raise;
+    // only affects contact-solving precision, not the hand-rolled wheel
+    // force model or drive-command kinematics.
+    m_world->getSolverInfo().m_numIterations = 30;
+
     m_fixedTimeStep = cfg.getFloat("/physics/timestep", 0.004166f);
     if (m_fixedTimeStep <= 0.0f) m_fixedTimeStep = 0.004166f;
     // Enough substeps to fully cover App's own dt spike clamp (0.1s) with
@@ -88,20 +99,35 @@ void Physics::init(Config& cfg)
     for (float sign : {-1.0f, 1.0f}) {
         float gx  = sign * (playHalfLength + goalWallOffset); // goal mouth (front)
         float gbx = gx + sign * goalDepth;                    // back wall inner face
-        float obx = gbx + sign * goalWallThick;               // back wall outer face
 
-        // Side walls (left z<0, right z>0), spanning front (gx) to back outer (obx).
-        float sideHalfX = std::fabs(obx - gx) * 0.5f;
-        float sideCenterX = (gx + obx) * 0.5f;
+        // Collision geometry extends all the way to the boundary wall's own
+        // inner face — NOT just goalDepth + goalWallThickness out from gx —
+        // so the goal structure and the boundary wall always seal flush with
+        // zero gap, regardless of how those independently-tunable configs
+        // happen to line up. With the shipped config they don't: goalDepth +
+        // goalWallThickness alone leaves a ~21mm slot between the two, too
+        // narrow for the ball to rest in but wide enough for a fast-moving
+        // ball to clip/tunnel through and get stuck in the pocket behind the
+        // goal — this extension closes that slot rather than relying on
+        // CCD/substeps to reliably catch every case of squeezing between two
+        // separately-tuned thin walls. (The *rendered* back wall in
+        // Field::render still uses goalWallThickness for its drawn
+        // thickness — only the invisible collision volume behind it grows to
+        // fill the gap; nothing changes visually.)
+        float outerX = sign * (hl - halfT); // boundary wall's inner face
+
+        // Side walls (left z<0, right z>0), spanning front (gx) to outerX.
+        float sideHalfX = std::fabs(outerX - gx) * 0.5f;
+        float sideCenterX = (gx + outerX) * 0.5f;
         for (float zSign : {-1.0f, 1.0f}) {
             float zCenter = zSign * (ghw + goalHalfT);
             goalWalls.push_back({ btVector3(sideCenterX, goalHalfH, zCenter),
                                    btVector3(sideHalfX, goalHalfH, goalHalfT) });
         }
 
-        // Back wall, spanning the outer faces of both side walls.
-        float backHalfX = goalWallThick * 0.5f;
-        float backCenterX = gbx + sign * backHalfX;
+        // Back wall, spanning from its inner (rendered) face to outerX.
+        float backHalfX = std::fabs(outerX - gbx) * 0.5f;
+        float backCenterX = (gbx + outerX) * 0.5f;
         goalWalls.push_back({ btVector3(backCenterX, goalHalfH, 0.0f),
                                btVector3(backHalfX, goalHalfH, ghw + goalWallThick) });
     }
