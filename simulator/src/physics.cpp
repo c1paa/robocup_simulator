@@ -33,13 +33,17 @@ void Physics::init(Config& cfg)
     m_world->addRigidBody(m_groundBody.get());
 
     // Field boundary walls: four static boxes sized from the same /field/*
-    // values Field::render uses, so the drawn walls and the raycast targets
-    // coincide. These are raycast-only (no contact response with the robot);
-    // full wall collision is ROADMAP item 7.
+    // values Field::render uses, so the drawn walls, the raycast targets and
+    // the contact-response bodies all coincide. Full collision response (not
+    // just raycast) — see ROADMAP item 7, closed as a side effect of the ball
+    // task (docs/tasks/ball-physics.md).
     float length = cfg.getFloat("/field/length", 12600.0f) / MM;
     float width  = cfg.getFloat("/field/width",   9600.0f) / MM;
     float wallH  = cfg.getFloat("/field/wall_height",    150.0f) / MM;
     float wallT  = cfg.getFloat("/field/wall_thickness",  10.0f) / MM;
+
+    float wallFriction    = cfg.getFloat("/physics/field/wall_friction",    0.3f);
+    float wallRestitution = cfg.getFloat("/physics/field/wall_restitution", 0.4f);
 
     float hl     = length * 0.5f;
     float hw     = width * 0.5f;
@@ -59,9 +63,8 @@ void Physics::init(Config& cfg)
 
     // Goal structures: two side walls + a back wall per goal, sized/positioned
     // from the same /field/goal_* values Field::render's drawGoal lambda uses,
-    // so the drawn goals and the raycast targets coincide. Same raycast-only
-    // treatment as the boundary walls above (CF_NO_CONTACT_RESPONSE) — full
-    // collision response for the robot/ball is still ROADMAP item 7.
+    // so the drawn goals, the raycast targets and the contact-response bodies
+    // all coincide. Same contact-response treatment as the boundary walls above.
     float boundaryWidth = cfg.getFloat("/field/boundary_width",      300.0f) / MM;
     float goalWidth      = cfg.getFloat("/field/goal_width",         1000.0f) / MM;
     float goalDepth       = cfg.getFloat("/field/goal_depth",          180.0f) / MM;
@@ -101,10 +104,11 @@ void Physics::init(Config& cfg)
         auto motion = std::make_unique<btDefaultMotionState>(
             btTransform(btQuaternion::getIdentity(), w.center));
         btRigidBody::btRigidBodyConstructionInfo ci(0.0f, motion.get(), shape.get());
+        ci.m_friction = wallFriction;
+        ci.m_restitution = wallRestitution;
         auto body = std::make_unique<btRigidBody>(ci);
         body->setCollisionFlags(body->getCollisionFlags() |
-                                btCollisionObject::CF_STATIC_OBJECT |
-                                btCollisionObject::CF_NO_CONTACT_RESPONSE);
+                                btCollisionObject::CF_STATIC_OBJECT);
         m_world->addRigidBody(body.get());
         m_wallShapes.push_back(std::move(shape));
         m_wallMotionStates.push_back(std::move(motion));
@@ -116,10 +120,11 @@ void Physics::init(Config& cfg)
         auto motion = std::make_unique<btDefaultMotionState>(
             btTransform(btQuaternion::getIdentity(), w.center));
         btRigidBody::btRigidBodyConstructionInfo ci(0.0f, motion.get(), shape.get());
+        ci.m_friction = wallFriction;
+        ci.m_restitution = wallRestitution;
         auto body = std::make_unique<btRigidBody>(ci);
         body->setCollisionFlags(body->getCollisionFlags() |
-                                btCollisionObject::CF_STATIC_OBJECT |
-                                btCollisionObject::CF_NO_CONTACT_RESPONSE);
+                                btCollisionObject::CF_STATIC_OBJECT);
         m_world->addRigidBody(body.get());
         m_wallShapes.push_back(std::move(shape));
         m_wallMotionStates.push_back(std::move(motion));

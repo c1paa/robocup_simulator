@@ -44,6 +44,11 @@ message SensorData {
 
     // Latest completed lidar scan (robot body frame)
     repeated LidarPoint lidar_points = 15;
+
+    // Ball ground-truth position (meters)
+    float ball_pos_x = 16;
+    float ball_pos_y = 17;
+    float ball_pos_z = 18;
 }
 
 message LidarPoint {

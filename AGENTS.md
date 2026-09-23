@@ -36,6 +36,10 @@ Class responsibilities (see their headers for the exact interface):
 - `Field` — field geometry and rendering, driven entirely by config.
 - `Robot` — single robot's dynamics (Bullet rigid body + 3-omni-wheel friction/slip model),
   geometry, and rendering; owns the `MirrorProfile` and the dead-reckoning odometry estimate.
+- `Ball` — the (golf) ball: a plain Bullet `btSphereShape` dynamic rigid body with stock
+  friction/restitution/rolling-friction/damping (no hand-rolled force model — unlike `Robot`),
+  rendered in both the viewer and the robot's mirror-camera cubemap. See
+  [`docs/tasks/ball-physics.md`](docs/tasks/ball-physics.md).
 - `MirrorProfile` — mirror shape (`cone`/`hyperbola`) as a profile function `r = f(h)`; the
   single source of truth for mirror geometry, used both for the drawn mesh (`Robot`) and the
   optics (`Camera`). See [`docs/tasks/mirror-camera-vision.md`](docs/tasks/mirror-camera-vision.md).
@@ -55,7 +59,9 @@ Class responsibilities (see their headers for the exact interface):
 - **Units**: config JSON is always millimetres; convert to metres exactly once, at load time,
   in the class that owns the field (see `static const float MM = 1000.0f;` pattern in
   `robot.cpp`, `camera.cpp`, `physics.cpp`). Never introduce a second unit convention or do the
-  conversion at the call site.
+  conversion at the call site. The one exception is *mass*: `/physics/robot/mass` and
+  `/physics/ball/mass` are in grams (converted to kg with the same `/ 1000` pattern, but a
+  different physical quantity — see `Robot::init` / `Ball::init`).
 - **Config access**: always go through `Config::instance().getFloat/getInt/getString(path,
   default)`. Every value needs a sane default — configs are optional, not required (see
   `App::init`, which only warns and falls back if the JSON files are missing).

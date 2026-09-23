@@ -31,9 +31,9 @@ private:
     std::unique_ptr<btRigidBody> m_groundBody;
 
     // Static field boundary walls + goal structures (side/back walls of both
-    // goals). Raycast targets only (see ROADMAP item 8 / the lidar task) —
-    // CF_NO_CONTACT_RESPONSE keeps them from blocking the robot, which is a
-    // tracked item-7 gap.
+    // goals). Static bodies with full contact response (no longer raycast-only)
+    // so the ball bounces off them and the robot can't drive through them —
+    // see docs/tasks/ball-physics.md.
     std::vector<std::unique_ptr<btBoxShape>> m_wallShapes;
     std::vector<std::unique_ptr<btDefaultMotionState>> m_wallMotionStates;
     std::vector<std::unique_ptr<btRigidBody>> m_wallBodies;

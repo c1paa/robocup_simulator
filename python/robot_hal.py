@@ -100,6 +100,13 @@ class SimRobotHAL:
             return None
         return (data.odom_x, data.odom_z, data.odom_yaw)
 
+    def get_ball_position(self):
+        """Ball ground-truth position (x, y, z), or None."""
+        data = self._latest_data()
+        if data is None:
+            return None
+        return (data.ball_pos_x, data.ball_pos_y, data.ball_pos_z)
+
     def get_lidar_scan(self):
         """Latest completed lidar scan as an (N, 3) ndarray [angle, distance,
         intensity] (angle in radians, robot body frame), or None."""

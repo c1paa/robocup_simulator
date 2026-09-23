@@ -28,6 +28,9 @@ struct SharedState
     double timestamp = 0.0;
     uint64_t frameId = 0;
 
+    // Ball ground-truth position (meters)
+    glm::vec3 ballPosition{0.0f, 0.0f, 0.0f};
+
     // Dead-reckoning odometry (drifts from ground truth under slip)
     float odomX = 0.0f;
     float odomZ = 0.0f;

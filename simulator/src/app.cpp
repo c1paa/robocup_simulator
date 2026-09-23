@@ -3,6 +3,7 @@
 #include "physics.h"
 #include "field.h"
 #include "robot.h"
+#include "ball.h"
 #include "camera.h"
 #include "lidar_sensor.h"
 #include "config.h"
@@ -48,6 +49,7 @@ bool App::init(const std::string& configDir)
     m_physics  = std::make_unique<Physics>();
     m_field    = std::make_unique<Field>();
     m_robot    = std::make_unique<Robot>();
+    m_ball     = std::make_unique<Ball>();
     m_camera   = std::make_unique<Camera>();
     m_lidar    = std::make_unique<LidarSensor>();
     m_grpc     = std::make_unique<GrpcServer>();
@@ -55,12 +57,14 @@ bool App::init(const std::string& configDir)
     m_physics->init(cfg);
     m_field->init(cfg);
     m_robot->init(cfg, m_physics->world());
+    m_ball->init(cfg, m_physics->world());
     m_camera->init(cfg, m_robot->mirrorProfile(), m_robot->cameraHeight(), m_renderer.get());
     m_lidar->init(cfg, m_physics->world());
     m_renderer->init(m_width, m_height);
     m_grpc->setRobot(m_robot.get());
     m_grpc->setCamera(m_camera.get());
     m_grpc->setLidar(m_lidar.get());
+    m_grpc->setBall(m_ball.get());
     m_grpc->start();
 
     std::cout << "[App] Simulator ready." << std::endl;
@@ -308,6 +312,7 @@ void App::update(float dt)
     m_robot->applyDriveForces(dt);
     m_physics->step(dt);
     m_robot->syncFromPhysics();
+    m_ball->syncFromPhysics();
     m_lidar->update(m_robot->position(), m_robot->orientation(), dt);
     m_grpc->update(dt);
 }
@@ -319,6 +324,7 @@ void App::render()
         [&](Renderer& r) {
             m_field->render(r);
             m_robot->renderBody(r);
+            m_ball->render(r);
         });
     glViewport(0, 0, m_width, m_height);
 
@@ -343,6 +349,7 @@ void App::render()
     }
     m_field->render(*m_renderer);
     m_robot->render(*m_renderer);
+    m_ball->render(*m_renderer);
     if (m_showPhysicsDebug) {
         m_physics->debugDraw(*m_renderer);
     }

@@ -83,6 +83,7 @@ set(SOURCES
     src/physics.cpp
     src/field.cpp
     src/robot.cpp
+    src/ball.cpp
     src/camera.cpp
     src/lidar_sensor.cpp
     src/mirror_profile.cpp

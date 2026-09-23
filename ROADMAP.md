@@ -25,18 +25,20 @@ Ranked by what's most load-bearing for the project's actual purpose (feeding vis
 robot-control client) — do this roughly top to bottom, but treat it as a starting point to
 argue with, not a mandate.
 
-Items 1, 2, 4 and 8 are **done** — see [`docs/tasks/mirror-camera-vision.md`](docs/tasks/mirror-camera-vision.md)
-(items 1–2), [`docs/tasks/omni-wheel-dynamics.md`](docs/tasks/omni-wheel-dynamics.md) (item 4) and
-[`docs/tasks/lidar-sensor.md`](docs/tasks/lidar-sensor.md) (item 8) for how they were implemented.
+Items 1, 2, 3, 4 and 8 are **done** — see [`docs/tasks/mirror-camera-vision.md`](docs/tasks/mirror-camera-vision.md)
+(items 1–2), [`docs/tasks/ball-physics.md`](docs/tasks/ball-physics.md) (item 3, plus the
+wall/goal half of item 7), [`docs/tasks/omni-wheel-dynamics.md`](docs/tasks/omni-wheel-dynamics.md)
+(item 4) and [`docs/tasks/lidar-sensor.md`](docs/tasks/lidar-sensor.md) (item 8) for how they
+were implemented.
 
 1. ~~gRPC server~~ — done (see above).
 2. ~~Real mirror-camera rendering~~ — done (see above).
 
-3. **Ball** — there is no ball anywhere in the codebase (`Physics`, `Field`, `Robot`). Configs
-   already carry `physics.ball` (radius/mass/friction/restitution) unused. Needs a `Ball` type
-   (or similar) with a Bullet sphere rigid body, spawn position, and rendering. Also gives the
-   wall/goal boxes added for item 8 real collision response (currently raycast-only), which as
-   a side effect closes the wall/goal half of item 7 too. See
+3. ~~Ball~~ — done: a `Ball` type with a Bullet sphere rigid body (spawned forward of the
+   robot at field center), rolling friction/damping so it settles, rendered in both the viewer
+   and the robot's mirror-camera cubemap, and streamed over gRPC as ground-truth
+   `ball_pos_*`. As a side effect this gave the wall/goal boxes real collision response (they
+   were raycast-only), closing the wall/goal half of item 7. See
    [`docs/tasks/ball-physics.md`](docs/tasks/ball-physics.md).
 
 4. ~~Robot ↔ physics integration~~ — done: the robot is a Bullet rigid body driven by a
@@ -53,11 +55,10 @@ Items 1, 2, 4 and 8 are **done** — see [`docs/tasks/mirror-camera-vision.md`](
    (e.g. `std::map<int, Robot>`) instead of a single instance. (Unaffected by item 4 — still
    open.)
 
-7. **Field collision** — walls/goals are drawn (`Field::render`) but have no Bullet collision
-   shapes, so nothing currently stops the robot or a future ball from leaving the field.
-   The four boundary walls and both goal structures (side + back walls) now have static
-   collision boxes (raycast targets only — see item 8), but full collision *response* for the
-   robot/ball is still open.
+7. **Field collision** — walls/goals are drawn (`Field::render`); the four boundary walls and
+   both goal structures (side + back walls) have static collision boxes with full contact
+   *response* for the robot/ball (no longer raycast-only) — see item 3. Any remaining gap, if
+   any, would be field geometry not covered by the boxes already added for the lidar task.
 
 8. ~~LiDAR sensor + Python hardware-abstraction seed~~ — done: an LD06-like 360° 2D scanning
    lidar (`LidarSensor`, Bullet raycast sweep with range/rate/noise/dropout matched to the real

@@ -9,6 +9,7 @@ class Renderer;
 class Physics;
 class Field;
 class Robot;
+class Ball;
 class Camera;
 class LidarSensor;
 class GrpcServer;
@@ -46,6 +47,7 @@ private:
     std::unique_ptr<Physics> m_physics;
     std::unique_ptr<Field> m_field;
     std::unique_ptr<Robot> m_robot;
+    std::unique_ptr<Ball> m_ball;
     std::unique_ptr<Camera> m_camera;
     std::unique_ptr<LidarSensor> m_lidar;
     std::unique_ptr<GrpcServer> m_grpc;

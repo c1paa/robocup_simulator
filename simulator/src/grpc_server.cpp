@@ -2,6 +2,7 @@
 #include "simulator_service.h"
 #include "config.h"
 #include "robot.h"
+#include "ball.h"
 #include "camera.h"
 #include "lidar_sensor.h"
 
@@ -87,6 +88,9 @@ void GrpcServer::update(float dt)
         }
         if (m_lidar) {
             m_state.lidarPoints = m_lidar->latestScan();
+        }
+        if (m_ball) {
+            m_state.ballPosition = m_ball->position();
         }
         m_state.timestamp = std::chrono::duration<double>(
             std::chrono::steady_clock::now().time_since_epoch()).count();
