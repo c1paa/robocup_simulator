@@ -311,6 +311,23 @@ void App::handleKeyboardInput(const Uint8* keys, float dt)
         m_lastManualStrafe = strafe;
         m_lastManualTurn   = turn;
     }
+
+    // Space = spin the dribbler at full capture speed while held, stop on
+    // release. F = fire the kicker at full requested power, once per press
+    // (edge-triggered — holding it down must not spam requestKick every
+    // frame, each call would just keep re-draining whatever charge has
+    // trickled back in).
+    bool dribbleHeld = keys[SDL_SCANCODE_SPACE] != 0;
+    if (m_dribbler && dribbleHeld != m_lastManualDribbleHeld) {
+        m_dribbler->setTargetSpeed(dribbleHeld ? 1.0f : 0.0f);
+        m_lastManualDribbleHeld = dribbleHeld;
+    }
+
+    bool kickHeld = keys[SDL_SCANCODE_F] != 0;
+    if (kickHeld && !m_lastManualKickHeld && m_kicker && m_robot && m_ball) {
+        m_kicker->requestKick(*m_robot, *m_ball, 1.0f);
+    }
+    m_lastManualKickHeld = kickHeld;
 }
 
 void App::update(float dt)

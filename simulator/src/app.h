@@ -102,4 +102,9 @@ private:
     float m_lastManualDrive  = 0.0f;
     float m_lastManualStrafe = 0.0f;
     float m_lastManualTurn   = 0.0f;
+
+    // Manual dribbler/kicker (Space = dribble while held, F = kick on press).
+    // Same "only on change" rationale as the drive keys above.
+    bool m_lastManualDribbleHeld = false;
+    bool m_lastManualKickHeld    = false;
 };
