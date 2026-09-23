@@ -43,8 +43,11 @@ void LidarSensor::update(const glm::vec3& robotPos, float robotYaw, float dt)
     // Rays are horizontal (Y is world up), launched from the mount height.
     btVector3 from(robotPos.x, m_height, robotPos.z);
 
-    // Angle 0 = robot forward (+X body frame). Positive body angle rotates +X
-    // toward -Z (same sign as yaw), so a sample at body angle theta points in
+    // Angle 0 = robot forward (+X body frame). Positive body angle sweeps the
+    // same direction as increasing yaw (+X rotating toward -Z, per
+    // AGENTS.md), which is the robot's LEFT — confirmed empirically: the
+    // manual-drive LEFT key sends positive omega and turns the robot left
+    // (see App::handleKeyboardInput). A sample at body angle theta points in
     // world direction (cos(yaw+theta), 0, -sin(yaw+theta)).
     std::normal_distribution<float> noise(0.0f, m_rangeNoiseStd);
     std::uniform_real_distribution<float> dropout(0.0f, 1.0f);

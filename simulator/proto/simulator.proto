@@ -47,7 +47,8 @@ message SensorData {
 }
 
 message LidarPoint {
-    float angle = 1;     // radians, robot body frame, 0 = forward (+X)
+    float angle = 1;     // radians, robot body frame, 0 = forward (+X); positive = left
+                          // (same rotation sense as omega/yaw)
     float distance = 2;  // meters
     float intensity = 3; // 0.0-1.0, synthetic confidence value
 }

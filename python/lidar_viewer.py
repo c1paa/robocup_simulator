@@ -28,7 +28,9 @@ def main():
     fig = plt.figure("LiDAR", figsize=(6, 6))
     ax = fig.add_subplot(111, projection="polar")
     ax.set_theta_zero_location("N")   # body-forward (angle=0) points up
-    ax.set_theta_direction(-1)        # positive angle sweeps clockwise on screen
+    ax.set_theta_direction(1)         # positive angle (robot's left) sweeps
+                                       # counter-clockwise, i.e. to the left
+                                       # of "up" on screen
     ax.set_rlabel_position(135)
     ax.set_title("Robot-frame LiDAR scan (forward = up)")
     scatter = ax.scatter([], [], s=4, c=[], cmap="viridis", vmin=0.0, vmax=1.0)

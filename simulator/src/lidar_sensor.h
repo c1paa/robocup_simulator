@@ -8,7 +8,9 @@
 class Config;
 
 // A single LiDAR return, in the robot body frame. angle = 0 is forward (+X)
-// and increases the same way yaw does (positive yaw rotates +X toward -Z).
+// and increases the same way yaw does (positive yaw rotates +X toward -Z,
+// per AGENTS.md) — which is the robot's LEFT, confirmed empirically via the
+// manual-drive keybinding (App::handleKeyboardInput).
 struct LidarPoint
 {
     float angle = 0.0f;     // radians, body frame, 0 = forward (+X)
