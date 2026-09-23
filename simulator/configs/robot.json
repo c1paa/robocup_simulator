@@ -6,11 +6,12 @@
             "count": 3,
             "center_diameter": 160,
             "wheel_diameter": 48,
-            "angle_offset": 90
+            "angle_offset": 180
         },
         "physics": {
             "wheel_friction_driven": 0.9,
             "wheel_friction_lateral": 0.15,
+            "friction_response_gain": 0.4,
             "moment_of_inertia_z": null
         },
         "mirror": {

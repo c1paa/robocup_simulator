@@ -77,6 +77,7 @@ private:
     float m_gravity = 9.81f;  // m/s^2
     float m_wheelFrictionDriven  = 0.9f;
     float m_wheelFrictionLateral = 0.15f;
+    float m_frictionResponseGain = 0.4f;
 
     // ---- Motor parameters ----
     float m_maxLinearSpeed  = 3.0f;

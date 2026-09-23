@@ -49,6 +49,7 @@ void Robot::init(Config& cfg, btDiscreteDynamicsWorld* world)
     m_gravity = cfg.getFloat("/physics/gravity", 9810.0f) / MM;
     m_wheelFrictionDriven  = cfg.getFloat("/robot/physics/wheel_friction_driven",  0.9f);
     m_wheelFrictionLateral = cfg.getFloat("/robot/physics/wheel_friction_lateral", 0.15f);
+    m_frictionResponseGain = cfg.getFloat("/robot/physics/friction_response_gain", 0.4f);
 
     // ---- Omni-wheel geometry (precompute once; angles are fixed) ----
     m_wheelR = m_wheelCenterDiameter * 0.5f;
@@ -88,9 +89,18 @@ void Robot::init(Config& cfg, btDiscreteDynamicsWorld* world)
 
     btRigidBody::btRigidBodyConstructionInfo ci(mass, m_motionState.get(),
                                                 m_collisionShape.get(), localInertia);
-    // Chassis belly-on-ground drag, not traction — traction comes from the
-    // per-wheel friction model in applyDriveForces, so keep this near zero.
-    ci.m_friction    = cfg.getFloat("/physics/robot/friction", 0.05f);
+    // Chassis belly-on-ground drag, not traction — traction comes entirely
+    // from the per-wheel friction model in applyDriveForces. Keep this at
+    // *exactly* zero, not just "small": a flat cylinder resting on a flat
+    // plane is a degenerate contact case for Bullet's solver (the contact
+    // manifold it picks isn't perfectly centered/stable frame to frame), and
+    // even a small nonzero friction there was measured to add a spurious yaw
+    // torque during lateral (vy) motion — e.g. 0.05 produced ~0.86 rad of
+    // unwanted rotation over a ~1s strafe that should have been perfectly
+    // straight; 0.0 measured effectively zero. If chassis-vs-wall collision
+    // response is needed later (see ROADMAP.md item 7), give it friction on
+    // a *dedicated* contact (e.g. a separate bumper shape), not this one.
+    ci.m_friction    = cfg.getFloat("/physics/robot/friction", 0.0f);
     ci.m_restitution = cfg.getFloat("/physics/robot/restitution", 0.0f);
     m_body = std::make_unique<btRigidBody>(ci);
     m_body->setAngularFactor(btVector3(0.0f, 1.0f, 0.0f)); // yaw only, no tipping
@@ -169,11 +179,23 @@ void Robot::applyDriveForces(float dt)
     float maxRolling = m_wheelFrictionDriven * normal;
     float maxLateral = m_wheelFrictionLateral * normal;
 
-    // Desired force per wheel that would fully close each slip gap this step,
+    // Desired force per wheel that would close each slip gap this step,
     // computed first for all wheels so the Coulomb limit can be applied as a
     // *common* scale factor. Clamping each wheel independently would break the
     // force ratio the omni geometry needs (wheel 0 carries twice the rear
     // wheels' load for pure forward motion) and produce spurious net torque.
+    //
+    // wheelMass = mass/3 is an exact effective mass for pure translation (3
+    // symmetric wheels sharing the body mass), but not for rotation: it
+    // implies an effective yaw inertia of mass*R^2, which generally doesn't
+    // match the body's actual moment of inertia (e.g. default config: ~0.016
+    // vs the solid-cylinder default ~0.010 kg*m^2). That mismatch makes a
+    // full one-step "close the whole gap" (deadbeat) force overshoot the
+    // yaw-rate correction and ring/oscillate after a turn. m_frictionResponseGain
+    // trades a bit of settling speed for stability margin instead of trying
+    // to exactly re-derive the coupled translation/rotation effective mass.
+    // The Coulomb limit (maxRolling/maxLateral) is unaffected, so top-end
+    // traction under heavy slip doesn't change, only the small-slip response.
     float desiredRolling[kOmniWheels];
     float desiredLateral[kOmniWheels];
     for (int i = 0; i < kOmniWheels; i++) {
@@ -186,8 +208,8 @@ void Robot::applyDriveForces(float dt)
         float slipRolling = m_wheelSpeed[i] - actualRolling;
         float slipLateral = 0.0f - actualLateral; // wheel is never driven sideways
 
-        desiredRolling[i] = wheelMass * slipRolling / dt;
-        desiredLateral[i] = wheelMass * slipLateral / dt;
+        desiredRolling[i] = m_frictionResponseGain * wheelMass * slipRolling / dt;
+        desiredLateral[i] = m_frictionResponseGain * wheelMass * slipLateral / dt;
     }
 
     float maxRoll = 0.0f;
