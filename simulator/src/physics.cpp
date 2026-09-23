@@ -37,7 +37,12 @@ void Physics::init(Config& cfg)
 
 void Physics::step(float dt)
 {
-    m_world->stepSimulation(dt, 3, 1.0f / 240.0f);
+    // Single variable-timestep step per frame, so the per-frame wheel friction
+    // forces Robot::applyDriveForces applies are integrated over exactly the
+    // same dt they were computed for. (Bullet clears accumulated forces after
+    // each internal substep; stepping once per frame keeps the hand-rolled
+    // Coulomb model and the integrator in agreement.)
+    m_world->stepSimulation(dt, 0, 0.0f);
 }
 
 void Physics::shutdown()

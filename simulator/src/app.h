@@ -86,10 +86,12 @@ private:
     bool m_showPhysicsDebug = false;
     bool m_showCameraPreview = false;
 
-    // Manual robot drive (arrow keys) — independent of gRPC SendCommand.
+    // Manual robot drive (arrow keys + Q/E) — independent of gRPC SendCommand.
     // Only sent on press/release edges so it doesn't fight an active gRPC
     // client by re-issuing a command every frame.
     float m_manualDriveSpeed = 4.0f;
-    float m_lastManualDrive = 0.0f;
-    float m_lastManualTurn  = 0.0f;
+    float m_manualTurnSpeed  = 2.5f;
+    float m_lastManualDrive  = 0.0f;
+    float m_lastManualStrafe = 0.0f;
+    float m_lastManualTurn   = 0.0f;
 };

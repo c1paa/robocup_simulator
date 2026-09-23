@@ -17,8 +17,9 @@ grpc::Status SimulatorServiceImpl::SendCommand(
 
         std::lock_guard<std::mutex> lock(m_state.mtx);
         m_state.hasCommand = true;
-        m_state.leftWheel = cmd.left_wheel();
-        m_state.rightWheel = cmd.right_wheel();
+        m_state.vx = cmd.vx();
+        m_state.vy = cmd.vy();
+        m_state.omega = cmd.omega();
         m_state.kickPower = cmd.kick_power();
         m_state.dribbleSpeed = cmd.dribble_speed();
     }
@@ -57,6 +58,9 @@ grpc::Status SimulatorServiceImpl::SensorStream(
             data.set_velocity(m_state.velocity);
             data.set_angular_velocity(m_state.angularVelocity);
             data.set_timestamp(m_state.timestamp);
+            data.set_odom_x(m_state.odomX);
+            data.set_odom_z(m_state.odomZ);
+            data.set_odom_yaw(m_state.odomYaw);
         }
         if (!writer->Write(data)) break;
     }

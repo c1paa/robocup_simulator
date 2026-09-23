@@ -33,7 +33,8 @@ Class responsibilities (see their headers for the exact interface):
 - `Renderer` — thin immediate-mode-style OpenGL wrapper (grid/line/box/sphere/cylinder/cone).
 - `Physics` — Bullet world lifecycle.
 - `Field` — field geometry and rendering, driven entirely by config.
-- `Robot` — single robot's kinematics, geometry, and rendering; owns the `MirrorProfile`.
+- `Robot` — single robot's dynamics (Bullet rigid body + 3-omni-wheel friction/slip model),
+  geometry, and rendering; owns the `MirrorProfile` and the dead-reckoning odometry estimate.
 - `MirrorProfile` — mirror shape (`cone`/`hyperbola`) as a profile function `r = f(h)`; the
   single source of truth for mirror geometry, used both for the drawn mesh (`Robot`) and the
   optics (`Camera`). See [`docs/tasks/mirror-camera-vision.md`](docs/tasks/mirror-camera-vision.md).
@@ -55,6 +56,18 @@ Class responsibilities (see their headers for the exact interface):
   `App::init`, which only warns and falls back if the JSON files are missing).
 - **Naming**: member variables use `m_camelCase`; classes are `PascalCase`; methods are
   `camelCase`. Match the surrounding file.
+- **Robot local frame / yaw convention**: the robot's body frame is `+X` forward, `+Y` up,
+  `+Z` lateral, and yaw rotates `+X` **toward `-Z`** for positive `omega`/increasing yaw — i.e.
+  local→world is `worldX = cosYaw·localX + sinYaw·localZ`, `worldZ = -sinYaw·localX +
+  cosYaw·localZ` (this is exactly what `glm::rotate(mat, yaw, (0,1,0))` produces, and what
+  `Camera`'s composite shader uses — see `mirror-camera-vision.md`). Bullet's own reported
+  angular-velocity Y component already matches this `omega` sign directly, no negation needed.
+  An earlier version of this file (and of `docs/tasks/omni-wheel-dynamics.md`) had this
+  backwards (`+X` toward `+Z`), which produced a robot that drove in the mirror image of the
+  direction it was visually facing — fixed during review; if you're implementing something new
+  against the yaw convention, verify empirically (drive-after-turning, compare against the
+  rendered/mirror-camera orientation) rather than trusting a written sign description, this one
+  included.
 - **No hardcoded machine-specific paths.** Anything path-related goes through
   `SCRIPT_DIR`-style resolution in the shell scripts or `--config-dir` at runtime — never an
   absolute `/Users/...` path in source, config, or scripts. (This bit the project once already:

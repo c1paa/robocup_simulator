@@ -61,8 +61,14 @@ external interface changes (`vx`/`vy`/`omega` body-frame commands, noisy odometr
 
 Local robot frame (matches the rest of the codebase — see `MirrorProfile`/`Camera`): `+X` is
 robot-forward, `+Z` is the other ground-plane axis (call it "lateral"), `+Y` is up, yaw rotates
-`+X` toward `+Z` for positive `omega` (this matches the sign convention already validated for
-`m_yaw` in `Robot::update` today — don't flip it).
+`+X` **toward `-Z`** for positive `omega` — i.e. local→world is `worldX = cosYaw·localX +
+sinYaw·localZ`, `worldZ = -sinYaw·localX + cosYaw·localZ` (exactly `glm::rotate(mat, yaw,
+(0,1,0))`, and exactly what `Camera`'s composite shader uses to rotate the mirror LUT by robot
+yaw — see `mirror-camera-vision.md`). **Verify this empirically before trusting it** (an earlier
+draft of this file had the sign backwards, which produced a robot that drove in the mirror image
+of its rendered facing direction): turn the robot via `omega`, drive `vx`, and confirm the
+resulting world displacement direction matches `(cos(yaw), -sin(yaw))`, not `(cos(yaw),
+sin(yaw))`.
 
 Wheel `i` (i = 0,1,2) sits at angle `θ_i = θ0 + i·120°` around the robot center, at radius `R`
 (= existing `/robot/wheels/center_diameter` / 2), where `θ0` defaults to 90° (config override,
@@ -83,15 +89,19 @@ n_i = ( cos θ_i, 0, sin θ_i)   // radial direction (passive rollers, mostly fr
 **Forward kinematics** (body velocity → desired wheel surface speed, no slip assumed):
 
 ```
-wheelTarget_i = -vx·sin(θ_i) + vy·cos(θ_i) + ω·R
+wheelTarget_i = -vx·sin(θ_i) + vy·cos(θ_i) - ω·R
 ```
 
-Derivation: ground-contact-point velocity for wheel `i` is `(vx, vy) + ω·(-p_i.z, p_i.x)`
-(2D rotation term), dotted with `t_i`. Do the algebra once, unit-test it if you want, but the
-formula above is the answer — use it directly rather than re-deriving per call site.
+Derivation: ground-contact-point velocity for wheel `i` is `(vx, vy) + ω·(p_i.z, -p_i.x)` (the
+local-frame rotational-velocity term for *this* yaw convention — differentiate the local→world
+formula above with respect to yaw to get it, don't reuse a cross-product formula from a
+different convention), dotted with `t_i`. Do the algebra once, unit-test it if you want, but the
+formula above is the answer — use it directly rather than re-deriving per call site. (This sign
+was wrong in an earlier draft — see the empirical-verification note above; don't skip it just
+because a formula is written down here.)
 
 **Inverse kinematics** (wheel speeds → estimated body velocity, used for odometry): build the
-3×3 matrix `M` whose row `i` is `(-sin θ_i, cos θ_i, R)`, invert it once at init (angles are
+3×3 matrix `M` whose row `i` is `(-sin θ_i, cos θ_i, -R)`, invert it once at init (angles are
 fixed), and compute `(vx, vy, ω) = M⁻¹ · wheelSpeeds` each time you need an estimate. Don't
 hand-solve a closed form — just invert the matrix (glm has `glm::inverse` for a `mat3`).
 
@@ -158,7 +168,11 @@ chassis belly) rather than reusing it for wheel friction; the two new
   `m_position.x += ...`/`m_yaw += ...` lines) — position/yaw now come from the Bullet body's
   transform after each physics step (`body->getWorldTransform()`), read back into `m_position`/
   `m_yaw` so `Robot::render`/`renderBody` (used by the mirror-camera cubemap capture — don't
-  change their signatures) keep working unmodified.
+  change their signatures) keep working unmodified. Extracting yaw from the transform's basis
+  (`fwd = basis · (1,0,0)`) needs `yaw = atan2(-fwd.z, fwd.x)` (note the negated `z`) to match
+  this file's local→world convention — `atan2(fwd.z, fwd.x)` gives the mirror-image angle and
+  is a one-character bug that will pass a casual read; verify with the empirical check from the
+  math section above before moving on, not just by reading the formula.
 - **Ordering in `App::update`**: compute and apply this frame's wheel friction forces (Phase 3)
   *before* `m_physics->step(dt)`, then read the robot's new transform back out *after* the step.
   Today's order is `m_physics->step(dt); m_robot->update(dt);` — that needs to become roughly
@@ -195,10 +209,14 @@ Each physics tick, for each wheel `i`, in the robot's current local frame:
 
 1. Get the robot's **actual** current body-frame velocity — the true one from the Bullet body
    (`getLinearVelocity()`/`getAngularVelocity()`, rotated into local frame using the body's
-   current orientation), not the commanded one.
+   current orientation — that rotation is the *inverse* of the local→world formula above, i.e.
+   `localX = cosYaw·worldX - sinYaw·worldZ`, `localZ = sinYaw·worldX + cosYaw·worldZ`; don't
+   reuse the local→world formula itself for this, it's not its own inverse), not the commanded
+   one. Bullet's raw angular-velocity Y component already matches this file's `omega` sign
+   directly — no negation needed (an earlier draft got this backwards too).
 2. Compute the wheel's actual ground-contact velocity components using the same structure as the
    forward-kinematics formula, but with the *actual* `(vx, vy, ω)`:
-   `actualRolling_i = -vx·sin θ_i + vy·cos θ_i + ω·R`, and similarly project onto `n_i` for
+   `actualRolling_i = -vx·sin θ_i + vy·cos θ_i - ω·R`, and similarly project onto `n_i` for
    `actualLateral_i` (desired lateral speed is always 0 — the wheel isn't driven sideways).
 3. Slip = `m_wheelSpeed[i] - actualRolling_i` (rolling direction), and `0 - actualLateral_i`
    (lateral direction).

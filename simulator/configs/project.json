@@ -56,8 +56,8 @@
         },
         "robot": {
             "mass": 2500,
-            "friction": 0.6,
-            "restitution": 0.3
+            "friction": 0.05,
+            "restitution": 0.0
         }
     }
 }

@@ -52,7 +52,7 @@ bool App::init(const std::string& configDir)
 
     m_physics->init(cfg);
     m_field->init(cfg);
-    m_robot->init(cfg);
+    m_robot->init(cfg, m_physics->world());
     m_camera->init(cfg, m_robot->mirrorProfile(), m_robot->cameraHeight(), m_renderer.get());
     m_renderer->init(m_width, m_height);
     m_grpc->setRobot(m_robot.get());
@@ -270,28 +270,36 @@ void App::handleKeyboardInput(const Uint8* keys, float dt)
     if (keys[SDL_SCANCODE_A]) m_lookTarget -= right * speed;
     if (keys[SDL_SCANCODE_D]) m_lookTarget += right * speed;
 
-    // Arrow keys drive the robot directly (manual testing, independent of
+    // Arrow keys + Q/E drive the robot directly (manual testing, independent of
     // gRPC SendCommand). Only send a new target on press/release edges so
     // this doesn't stomp on commands an active gRPC client is sending.
-    float drive = 0.0f, turn = 0.0f;
+    float drive = 0.0f, strafe = 0.0f, turn = 0.0f;
     if (keys[SDL_SCANCODE_UP])    drive += 1.0f;
     if (keys[SDL_SCANCODE_DOWN])  drive -= 1.0f;
     if (keys[SDL_SCANCODE_LEFT])  turn  -= 1.0f;
     if (keys[SDL_SCANCODE_RIGHT]) turn  += 1.0f;
+    if (keys[SDL_SCANCODE_Q])     strafe -= 1.0f;
+    if (keys[SDL_SCANCODE_E])     strafe += 1.0f;
 
-    if (m_robot && (drive != m_lastManualDrive || turn != m_lastManualTurn)) {
-        float left  = (drive - turn) * m_manualDriveSpeed;
-        float right2 = (drive + turn) * m_manualDriveSpeed;
-        m_robot->setWheelVelocities(left, right2);
-        m_lastManualDrive = drive;
-        m_lastManualTurn  = turn;
+    if (m_robot && (drive != m_lastManualDrive || strafe != m_lastManualStrafe ||
+                    turn != m_lastManualTurn)) {
+        m_robot->setBodyVelocity(
+            drive  * m_manualDriveSpeed,
+            strafe * m_manualDriveSpeed,
+            turn   * m_manualTurnSpeed);
+        m_lastManualDrive  = drive;
+        m_lastManualStrafe = strafe;
+        m_lastManualTurn   = turn;
     }
 }
 
 void App::update(float dt)
 {
+    // Apply this frame's wheel friction forces before stepping physics, then
+    // read the robot's new transform back out after the step.
+    m_robot->applyDriveForces(dt);
     m_physics->step(dt);
-    m_robot->update(dt);
+    m_robot->syncFromPhysics();
     m_grpc->update(dt);
 }
 

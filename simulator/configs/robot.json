@@ -5,7 +5,13 @@
         "wheels": {
             "count": 3,
             "center_diameter": 160,
-            "wheel_diameter": 48
+            "wheel_diameter": 48,
+            "angle_offset": 90
+        },
+        "physics": {
+            "wheel_friction_driven": 0.9,
+            "wheel_friction_lateral": 0.15,
+            "moment_of_inertia_z": null
         },
         "mirror": {
             "type": "cone",
@@ -19,9 +25,9 @@
             "height": 90
         },
         "motor": {
-            "max_speed": 3000,
-            "time_constant": 0.05,
-            "slip": 0.05
+            "max_linear_speed": 3000,
+            "max_angular_speed": 6.28,
+            "time_constant": 0.05
         },
         "kicker": {
             "max_power": 8.0,

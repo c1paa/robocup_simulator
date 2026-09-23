@@ -36,22 +36,28 @@ message SensorData {
 
     // Timestamp
     double timestamp = 11;
+
+    // Dead-reckoning odometry estimate (drifts under slip)
+    float odom_x = 12;
+    float odom_z = 13;
+    float odom_yaw = 14;
 }
 
 message RobotCommand {
     int32 robot_id = 1;
 
-    // Wheel velocities (-1.0 to 1.0, normalized)
-    float left_wheel = 2;
-    float right_wheel = 3;
+    // Body-frame velocity command (vx forward, vy lateral, omega yaw rate)
+    float vx = 2;
+    float vy = 3;
+    float omega = 4;
 
     // Kicker
-    float kick_power = 4;    // 0.0 to 1.0
+    float kick_power = 5;    // 0.0 to 1.0
 
     // Dribbler
-    float dribble_speed = 5; // -1.0 to 1.0
+    float dribble_speed = 6; // -1.0 to 1.0
 
-    double timestamp = 6;
+    double timestamp = 7;
 }
 
 message CommandResponse {

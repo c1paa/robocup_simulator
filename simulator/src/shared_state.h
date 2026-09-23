@@ -27,10 +27,16 @@ struct SharedState
     double timestamp = 0.0;
     uint64_t frameId = 0;
 
+    // Dead-reckoning odometry (drifts from ground truth under slip)
+    float odomX = 0.0f;
+    float odomZ = 0.0f;
+    float odomYaw = 0.0f;
+
     // Pending command (written by gRPC handler, consumed by sim thread)
     bool hasCommand = false;
-    float leftWheel = 0.0f;
-    float rightWheel = 0.0f;
+    float vx = 0.0f;
+    float vy = 0.0f;
+    float omega = 0.0f;
     float kickPower = 0.0f;
     float dribbleSpeed = 0.0f;
 };

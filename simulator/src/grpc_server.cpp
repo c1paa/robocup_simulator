@@ -58,7 +58,7 @@ void GrpcServer::update(float dt)
     {
         std::lock_guard<std::mutex> lock(m_state.mtx);
         if (m_state.hasCommand && m_robot) {
-            m_robot->setWheelVelocities(m_state.leftWheel, m_state.rightWheel);
+            m_robot->setBodyVelocity(m_state.vx, m_state.vy, m_state.omega);
             if (m_state.kickPower > 0.0f) m_robot->kick(m_state.kickPower);
             m_robot->dribble(m_state.dribbleSpeed);
             m_state.hasCommand = false;
@@ -80,6 +80,9 @@ void GrpcServer::update(float dt)
             m_state.yaw             = m_robot->orientation();
             m_state.velocity        = m_robot->velocity();
             m_state.angularVelocity = m_robot->angularVelocity();
+            m_state.odomX           = m_robot->odometryX();
+            m_state.odomZ           = m_robot->odometryZ();
+            m_state.odomYaw         = m_robot->odometryYaw();
         }
         m_state.timestamp = std::chrono::duration<double>(
             std::chrono::steady_clock::now().time_since_epoch()).count();

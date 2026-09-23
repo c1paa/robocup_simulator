@@ -47,8 +47,10 @@ Builds automatically first if the binary is missing. Options:
 - Right mouse drag — orbit
 - Scroll — pan (hold Shift to orbit, Cmd to zoom)
 - WASD — pan the look target
-- Arrow keys — drive the robot directly (forward/back/turn), independent of
-  gRPC `SendCommand` — handy for trying it out without a Python client
+- Arrow keys — drive the robot directly (Up/Down = forward/back, Left/Right =
+  turn), independent of gRPC `SendCommand` — handy for trying it out without a
+  Python client
+- Q / E — strafe the robot left / right
 - C — toggle the in-window mirror-camera preview overlay
 - Esc — quit
 
@@ -99,7 +101,8 @@ config through `Config::getFloat/getInt/getString` and convert immediately.
 
 ## Current status
 
-This is a work in progress. The viewer, field rendering, basic robot kinematics, the real
-mirror-camera image, and the gRPC interface (`SensorStream`/`SendCommand`) all work. There's
-still no ball, the robot isn't hooked into Bullet physics, and only one robot is supported.
-Full breakdown and priorities are in [`ROADMAP.md`](ROADMAP.md).
+This is a work in progress. The viewer, field rendering, the real mirror-camera image, the gRPC
+interface (`SensorStream`/`SendCommand`), and the robot's 3-omni-wheel Bullet-physics drivetrain
+(friction/slip, dead-reckoning odometry) all work. There's still no ball, no kicker/dribbler
+effect, no field-wall collision, and only one robot is supported. Full breakdown and priorities
+are in [`ROADMAP.md`](ROADMAP.md).
