@@ -65,11 +65,23 @@ the ball is currently modeled — this task extends `Ball`, it doesn't replace i
    log around `9e9a805` and the comment on `m_numIterations = 30` in `physics.cpp`). The dribbler
    needs *continuous, stable* contact for as long as the ball is captured — the one scenario where
    that bug class would hurt most — so don't reintroduce it here.
-2. **Kicker impulse goes through Bullet's own `applyImpulse(impulse, relativePosition)`**, not a
+2. ~~**Kicker impulse goes through Bullet's own `applyImpulse(impulse, relativePosition)`**, not a
    hand-rolled chip/push-down model. An off-center impulse (offset by the configured plunger
    height from the ball's center) naturally produces the right torque for chip/press-down effects
    via Bullet's own rigid body dynamics — don't special-case "if height offset is negative, add
-   upward velocity" or similar; let the physics do it.
+   upward velocity" or similar; let the physics do it.~~ **Superseded — this was wrong.**
+   `btRigidBody::applyImpulse(impulse, rel_pos)` splits into `applyCentralImpulse(impulse)`
+   (always `Δv = impulse/mass`, independent of `rel_pos`) plus a torque impulse from
+   `rel_pos.cross(impulse)`. The offset changes angular velocity (spin) only — it can never change
+   the ball's linear/COM velocity, so a pure height-offset impulse literally cannot chip the ball,
+   at any offset, no matter the sign. Verification item 6 below (claiming this was tested and
+   worked) was never actually rigorous. Reported by the user as "ball doesn't jump when kicked
+   below center, though it should" and fixed the same day by adding a real angle term
+   (`/robot/kicker/chip_max_angle`) that tilts the impulse vector itself for negative
+   `height_offset` — see the long comment above `Kicker::requestKick` in `kicker.cpp`. A flat
+   plunger plate genuinely can't chip from contact height alone in reality either (its contact
+   normal is horizontal regardless of contact height); real RoboCup chip kickers use a
+   mechanically angled plate, which `chip_max_angle` approximates.
 3. **The capacitor's charge is actually simulated over time in the simulator**, not just trusted
    from the client. `RobotCommand.kick_power` (0.0–1.0) is a *request*; the impulse actually
    delivered is `min(requested_power, current_charge_fraction) * max_impulse`, and firing drains
@@ -302,8 +314,12 @@ your scratchpad, not the repo.
 5. **Kick, neutral height**: `height_offset = 0`, captured ball, fire `kick_power = 1.0` at full
    charge — ball's vertical velocity component right after the kick should be small relative to
    its horizontal velocity.
-6. **Kick, low plunger**: negative `height_offset` — ball should show a measurably larger upward
-   velocity component (chip) than the neutral case, same power.
+6. **Kick, low plunger**: negative `height_offset` — ball should show a real, positive vertical
+   velocity component (chip) that grows toward `chip_max_angle` as `height_offset` approaches
+   `-ball_radius`, vs. exactly zero vertical velocity at `height_offset = 0`. (Verified 2026-09-23:
+   `height_offset = -10mm`, default `chip_max_angle = 30`, full power — ball reached ~0.14m peak
+   height and came back down with a real bounce; `height_offset = 0` stayed flat at exactly
+   ball-radius height throughout, confirming the fix didn't change the neutral-height baseline.)
 7. **Capacitor drains and recharges**: fire two kicks with less than `charge_time` seconds between
    them (both at `kick_power = 1.0`) — the second kick's resulting ball speed should be measurably
    lower than the first's. Fire a third after waiting a full `charge_time` — should be back to

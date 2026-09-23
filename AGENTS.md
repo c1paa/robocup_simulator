@@ -59,7 +59,11 @@ Class responsibilities (see their headers for the exact interface):
   [`docs/tasks/dribbler-kicker.md`](docs/tasks/dribbler-kicker.md).
 - `Kicker` — the solenoid kicker: an impulse (`applyImpulse` at the configured plunger-height
   offset) capped by a capacitor charge that is actually simulated (drains on fire, recharges
-  over `charge_time`). Owned by `App`, same pattern as `Dribbler`. See
+  over `charge_time`). Negative `height_offset` also tilts the impulse vector itself upward
+  (`/robot/kicker/chip_max_angle`, scaled by how far below center the offset is) to produce a real
+  chip — a pure position-offset impulse can't do this on its own, since `applyImpulse`'s linear
+  velocity change is independent of the offset point (see the comment above
+  `Kicker::requestKick`). Owned by `App`, same pattern as `Dribbler`. See
   [`docs/tasks/dribbler-kicker.md`](docs/tasks/dribbler-kicker.md).
 - `MirrorProfile` — mirror shape (`cone`/`hyperbola`) as a profile function `r = f(h)`; the
   single source of truth for mirror geometry, used both for the drawn mesh (`Robot`) and the

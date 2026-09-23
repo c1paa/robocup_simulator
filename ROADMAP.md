@@ -76,7 +76,12 @@ were implemented.
    the force model (no centering, no rotation-awareness) had a real bug where a stationary
    captured ball would spontaneously eject after ~1s — fixed, not just mitigated; see "Force
    model revision" in [`docs/tasks/dribbler-kicker.md`](docs/tasks/dribbler-kicker.md) for what
-   changed.
+   changed. The kicker's chip (negative `height_offset`) originally relied on an off-center
+   `applyImpulse` producing chip "for free" via Bullet's own dynamics — that assumption was
+   wrong (an impulse's linear/COM velocity change is independent of its application point,
+   offset only ever changes spin, never trajectory), so the ball never actually gained vertical
+   velocity at any offset. Fixed by giving `height_offset < 0` a real upward tilt on the impulse
+   itself (`/robot/kicker/chip_max_angle`), approximating the angled plate a real chip kicker uses.
 
 6. **Multi-robot support** — `App` holds a single `std::unique_ptr<Robot> m_robot`, but
    `SensorRequest`/`RobotCommand` already carry `robot_id`. If the target league needs more

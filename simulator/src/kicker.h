@@ -35,6 +35,9 @@ private:
     float m_heightOffset = 0.0f;    // m, plunger height relative to ball center
     float m_range = 0.04f;          // m, max ball-to-kicker distance
     float m_forwardOffset = 0.095f; // m, kick origin forward of chassis center
+    float m_chipMaxAngle = 0.0f;    // rad, launch angle at height_offset == -ball_radius
+                                     // (see the comment above requestKick in kicker.cpp for why
+                                     // this exists as its own term instead of relying on torque)
 
     float m_charge = 1.0f; // 0..1
 };
