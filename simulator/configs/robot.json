@@ -54,13 +54,15 @@
             "height_offset": 25,
             "capture_tolerance_forward": 15,
             "capture_tolerance_height": 10,
-            "friction": 0.6,
-            "normal_force": 0.15,
+            "friction": 1.5,
+            "normal_force": 1.0,
             "motor_time_constant": 0.03,
             "load_sag_gain": 0.4,
             "lip_height": 6,
-            "lip_forward_offset": 88,
-            "lip_thickness": 10
+            "lip_forward_offset": 70,
+            "lip_thickness": 10,
+            "response_gain": 0.4,
+            "centering_time_constant": 0.03
         }
     },
     "camera": {

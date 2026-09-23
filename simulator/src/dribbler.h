@@ -41,11 +41,12 @@ private:
     float m_heightOffset  = 0.015f;     // m, roller axis height above ground
     float m_captureToleranceForward = 0.015f; // m, +/- forward slack around forward_offset
     float m_captureToleranceHeight  = 0.010f; // m, +/- height slack around height_offset
-    float m_friction = 1.2f;           // Coulomb coefficient (roller vs ball)
-    float m_normalForce = 0.6f;        // N, effective press force between roller and ball
+    float m_friction = 1.5f;           // Coulomb coefficient (roller vs ball)
+    float m_normalForce = 1.0f;        // N, effective press force between roller and ball
     float m_motorTimeConstant = 0.03f; // s, first-order lag
     float m_loadSagGain = 0.4f;        // 0..1, speed lost when a ball loads the roller
     float m_responseGain = 0.4f;       // 0..1, see Robot::applyDriveForces's m_frictionResponseGain
+    float m_centeringTimeConstant = 0.03f; // s, how fast the pocket pulls an off-center ball back
 
     // ---- State ----
     float m_targetSpeed = 0.0f;  // [-1, 1], last commanded dribble_speed

@@ -80,7 +80,13 @@ void Robot::init(Config& cfg, btDiscreteDynamicsWorld* world)
     m_chassisShape = std::make_unique<btCylinderShape>(btVector3(radius, halfH, radius));
 
     float lipHeight   = cfg.getFloat("/robot/dribbler/lip_height",        6.0f)  / MM;
-    float lipForward  = cfg.getFloat("/robot/dribbler/lip_forward_offset", 88.0f) / MM;
+    // Deliberately kept well clear of the dribbler's capture equilibrium
+    // (forward_offset, ~111mm by default): the lip and the actively-captured
+    // ball's near surface used to overlap, so real Bullet contact resolution
+    // between them fought the dribbler's own hand-rolled force every frame
+    // and leaked a spurious, slowly growing robot yaw — see
+    // docs/tasks/dribbler-kicker.md's "Known limitation".
+    float lipForward  = cfg.getFloat("/robot/dribbler/lip_forward_offset", 70.0f) / MM;
     float lipThick    = cfg.getFloat("/robot/dribbler/lip_thickness",     10.0f)  / MM;
     float dribblerLen = cfg.getFloat("/robot/dribbler/length",            70.0f)  / MM;
     m_lipShape = std::make_unique<btBoxShape>(btVector3(
@@ -300,6 +306,7 @@ void Robot::syncFromPhysics()
 
     btVector3 lin = m_body->getLinearVelocity();
     m_velocity = std::sqrt(lin.x() * lin.x() + lin.z() * lin.z());
+    m_linearVelocityWorld = glm::vec3(lin.x(), lin.y(), lin.z());
     // Bullet's raw angular velocity Y component already matches this
     // codebase's yaw convention directly (see applyDriveForces).
     m_angularVelocity = m_body->getAngularVelocity().y();

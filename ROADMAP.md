@@ -47,18 +47,20 @@ were implemented.
    separately-drifting odometry estimate. See
    [`docs/tasks/omni-wheel-dynamics.md`](docs/tasks/omni-wheel-dynamics.md).
 
-5. ~~Kicker / dribbler~~ — done, with one known open issue: the dribbler roller is a
-   hand-rolled capture-force model (motor lag + load sag + tapered capture zone) and the kicker
-   is a simulated-capacitor impulse, both applied to the ball every frame before the physics
-   step. The robot chassis is now a `btCompoundShape` (chassis cylinder + a small front "lip"
-   that holds a resting ball). Verified empirically: approach/capture, hold-while-driving,
-   kick height/torque, capacitor drain+recharge, and forward/strafe regression all behave as
-   intended. **Not fixed**: a ball held stationary by the spinner for more than a few seconds
-   can drift sideways out of the capture zone with no turn commanded — a real conflict between
-   the dribbler's hand-rolled backspin and the ball's own real Bullet ground-rolling contact,
-   the same general class of issue as the sustained-contact chassis instability from `9e9a805`.
-   Mitigated (gentler default grip + a response-gain damping term) but not solved — see "Known
-   limitation" in [`docs/tasks/dribbler-kicker.md`](docs/tasks/dribbler-kicker.md).
+5. ~~Kicker / dribbler~~ — done: the dribbler roller is a hand-rolled capture-force model
+   (motor lag, load sag, tapered capture zone) that computes a single world-frame target
+   velocity for the ball's contact point — rigid co-rotation with the robot, a spring-like pull
+   to the center of the pocket, and the roller's own spin — all sharing one Coulomb-clamped grip
+   budget, so a ball entering the zone snaps to dead center and stays there at rest, but a sharp
+   enough turn or a hard reverse burst can genuinely eject it (keeping whatever spin it had).
+   The kicker is a simulated-capacitor impulse. Robot chassis is a `btCompoundShape` (cylinder +
+   a front "lip" that holds a resting, unpowered ball). Verified empirically via gRPC scripts:
+   centered capture, bounded rest stability (no drift), hold-while-driving, turn/reverse
+   ejection, kick height/torque, capacitor drain+recharge, forward/strafe regression. An earlier
+   version of the force model (no centering, no rotation-awareness) had a real bug where a
+   stationary captured ball would spontaneously eject after ~1s — fixed, not just mitigated; see
+   "Force model revision" in [`docs/tasks/dribbler-kicker.md`](docs/tasks/dribbler-kicker.md)
+   for what changed.
 
 6. **Multi-robot support** — `App` holds a single `std::unique_ptr<Robot> m_robot`, but
    `SensorRequest`/`RobotCommand` already carry `robot_id`. If the target league needs more

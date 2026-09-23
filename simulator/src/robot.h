@@ -28,6 +28,11 @@ public:
     float velocity() const { return m_velocity; }
     float angularVelocity() const { return m_angularVelocity; }
 
+    // World-frame linear velocity vector (velocity() above is just its XZ
+    // magnitude) — needed by Dribbler to compute the velocity a point
+    // rigidly attached to the robot would have (V_robot + omega x offset).
+    glm::vec3 linearVelocityWorld() const { return m_linearVelocityWorld; }
+
     // Dead-reckoning odometry (drifts away from ground truth under slip)
     float odometryX() const { return m_odomX; }
     float odometryZ() const { return m_odomZ; }
@@ -45,6 +50,7 @@ private:
     float m_yaw = 0.0f;
     float m_velocity = 0.0f;
     float m_angularVelocity = 0.0f;
+    glm::vec3 m_linearVelocityWorld = glm::vec3(0.0f);
 
     // Commanded body-frame velocity (vx forward, vy lateral, omega yaw rate)
     float m_targetVx    = 0.0f;

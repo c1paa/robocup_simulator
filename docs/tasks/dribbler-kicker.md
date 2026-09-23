@@ -9,10 +9,10 @@ currently no-op stubs (`Robot::kick()` / `Robot::dribble()` in `simulator/src/ro
 (`/robot/kicker`, `/robot/dribbler`) — this task fills in the physics behind them, not the
 transport.
 
-**Status: implemented and reviewed, with one known unresolved limitation** — see
-"Known limitation" near the end of this doc before tuning `/robot/dribbler/friction` or
-`normal_force` back up. Read that section first if a captured ball is drifting/ejecting sideways
-with no turn commanded.
+**Status: implemented, reviewed, and revised** — the original review found the capture force
+model was missing an active centering pull and would spontaneously eject a stationary, untouched
+ball after ~1s. See "Force model revision" near the end of this doc for what changed and why
+before touching `/robot/dribbler/friction`, `normal_force`, or `centering_time_constant`.
 
 Read [`AGENTS.md`](../../AGENTS.md) first (units convention, yaw convention, config-access
 pattern) and [`docs/tasks/ball-physics.md`](ball-physics.md) / `simulator/src/ball.cpp` for how
@@ -309,53 +309,62 @@ your scratchpad, not the repo.
    `dyaw`/oscillation behavior matches what `docs/tasks/omni-wheel-dynamics.md` established —
    the Phase 0 compound-shape change is the most likely place to accidentally regress this.
 
-## Known limitation (found during review, not fixed)
+## Force model revision: position + rotation aware capture (supersedes the original design)
 
-Empirically verified (repeatedly, via gRPC test scripts, not visual inspection): a ball held
-stationary in the capture zone by a spinning dribbler — robot not turning, `omega = 0` the whole
-time — starts drifting **laterally** (along local `Z`, out the side of the zone) after roughly
-0.7-1.3s of continuous capture, and the drift accelerates until the ball leaves the zone
-entirely. This reproduces from a fully-settled, perfectly centered start (no approach driving,
-no lip contact involved — both were tested and ruled out as the cause), and its rate scales
-with `/robot/dribbler/friction` × `normal_force`: at the doc's original suggested defaults
-(1.2 × 0.6 N) it blows up in under 2s; at gentler values (0.6 × 0.15 N — the values now shipped
-in `robot.json`) it takes several seconds, long enough for a realistic approach→capture→kick
-sequence, but it does not go away.
+The first implementation (reviewed above) computed the roller's target contact-point velocity in
+the robot's *local* frame without accounting for the frame itself rotating, and explicitly
+discarded the lateral (`Z`) slip component ("the roller doesn't constrain lateral slip"). Two
+real problems came from this, found via the same empirical (gRPC-script, not visual) testing
+methodology used throughout this project:
 
-Root cause, as far as this review got: the dribbler intentionally imparts **backspin** (positive
-local-`Z` angular velocity) so a captured ball's own weight/ground-friction pulls it toward the
-robot. But the ball is *simultaneously* in real Bullet contact with the ground, which enforces
-its own rolling-without-slip relationship between forward velocity and `Z`-axis spin — and for a
-ball being held roughly stationary while backspun, that ground relationship wants the *opposite*
-sign of `Z`-spin from what the dribbler is imposing. The two constraints (one hand-rolled, one
-real Bullet contact) are fighting over the same rotational DOF and can't both be satisfied, so
-the dribbler force rarely reaches zero even once the ball looks "settled" — it keeps injecting
-momentum every frame. That's consistent with everything observed: why lowering
-`friction`/`normal_force` (weaker injection) delays but doesn't prevent it, why a
-`response_gain` damping term (added during this review, mirroring
-`Robot::applyDriveForces`'s `m_frictionResponseGain`) helped smooth per-frame chatter but didn't
-fix the underlying drift, and why the eventual ejection direction is a genuine sideways slide
-(not a symmetric wobble) — some small seed asymmetry (most likely floating-point noise at the
-ball-ground contact) gets steadily amplified by the unresolved conflict rather than damped out.
+1. **No actual centering force existed.** A ball entering the capture zone just stayed wherever
+   it crossed the boundary — it was never pulled to the middle of the pocket, contradicting the
+   intended design (a real dribbler's tapered roller self-centers the ball).
+2. **A ball held stationary by a spinning dribbler, robot not turning at all, would spontaneously
+   drift sideways and eventually eject** — reproducible from a fully-settled, perfectly centered
+   start, with no lip or approach-driving involvement (both were tested and ruled out). The
+   backspin the dribbler imparts and the ball's own real Bullet ground-rolling contact were
+   fighting over the same rotational DOF with no restoring force to counteract the imbalance.
 
-This is the same *class* of bug as the sustained-contact chassis-vs-ball instability documented
-in the git history around commit `9e9a805` (continuous force against a body already in another
-contact relationship, resolved by two different mechanisms that don't agree) — not a copy-paste
-of that bug, but the same underlying weak point in this project's hybrid
-hand-rolled-force-plus-real-Bullet-contact approach. A real fix likely needs either (a) replacing
-the ground's real rolling-friction contact with a hand-rolled ground model too whenever a ball is
-dribbler-captured (consistent modeling instead of two independent ones), or (b) deriving the
-dribbler's target spin from the ball's actual rolling state instead of a fixed roller-surface
-target. Both are bigger changes than this review's scope. Left as a follow-up, the same way the
-chassis-vs-wall instability was — don't try to "tune it away" further with friction/normal_force
-without addressing the underlying conflict, per the lesson already learned from that earlier bug.
+Fix: `Dribbler::update` now computes a single **world-frame target velocity for the contact
+point**, combining three physically distinct components before one shared Coulomb-clamped
+force/torque is derived from the slip:
 
-Practical impact today: capture-and-hold-briefly-then-kick (the realistic gameplay sequence)
-works reliably within a few seconds; a robot that dribbles in place for a long time without
-acting will eventually lose the ball sideways with no visible cause. If this becomes a real
-problem in practice, that's the place to resume investigating, ideally with the same
-per-wheel/per-contact force instrumentation approach recommended (and not yet done) for the
-chassis-vs-wall case.
+- **Rigid attachment** (`V_robot + omega_robot × contactOffset`) — the velocity a point fixed to
+  the rotating robot would have. This is what makes turning cost something: holding the ball
+  through a turn means matching a centripetal/tangential demand that grows with turn rate, and a
+  hard reverse is a sudden change in `V_robot` the clamped force may not track — both now
+  genuinely eject the ball when the demand exceeds the grip budget, exactly as described by the
+  user: *"при повороте появляется нормальное ускорение, из-за которого мяч может не удержаться и
+  влететь из лунки — но не значит что он перестаёт вращаться."* Ejected balls keep whatever
+  spin/velocity they had (nothing here resets the ball on zone-exit, only the force stops being
+  applied), so a released, still-spinning ball chasing a retreating robot (the scenario the user
+  described) falls out of the existing physics for free.
+- **Centering** — a spring-like pull (NOT a one-timestep deadbeat — see the code comment on
+  `m_centeringTimeConstant` for why `posErr / dt` was a bug in its own right, saturating the
+  clamp on every frame regardless of how small the error was, leaving no budget for anything
+  else) toward the middle of the pocket. This is what makes entering the capture zone at all —
+  not where in it — the thing that matters, matching *"если мяч попадает в эту область то по
+  факту попадает в лунку и начинает держаться в центре."*
+- **Spin** — unchanged: the roller surface's own tangential target.
+
+All three share **one** Coulomb clamp (`friction × normal_force`) — a single grip budget, not
+separate allowances, matching *"все закруты дриблера создают некую прижимную силу"*.
+
+A second, unrelated bug surfaced during this same testing round: `/robot/dribbler/lip_forward_offset`
+(88mm) put the physical lip *inside* the ball's actively-captured resting position, so real Bullet
+contact between them fought the hand-rolled force every frame and leaked a spurious, slowly
+growing robot yaw with nothing commanded. Moved to 70mm (clear of the capture equilibrium) —
+see the comment in `Robot::init` above the `lipForward` config read.
+
+Current tuned config (`friction: 1.5`, `normal_force: 1.0`, `centering_time_constant: 0.03`):
+verified via repeated gRPC test scripts — a captured ball at rest stays in a bounded ~±4mm
+oscillation around dead center for 7.5s+ with no growth and no robot yaw drift; a gentle turn
+(~1 rad/s) is held throughout; a faster turn (~2 rad/s) or a hard reverse burst reliably ejects
+the ball within a few hundred ms while it keeps spinning. The exact turn rate at which grip is
+lost is not perfectly crisp run-to-run (small, expected sensitivity in a clamped/saturating
+controller near its limit) — treat "~2 rad/s" as an approximate threshold, not a guarantee, if
+tuning further.
 
 ## Docs to update when done
 

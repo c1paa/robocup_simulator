@@ -24,12 +24,14 @@ void Dribbler::init(Config& cfg)
     // friction is dimensionless; normal_force is already in the codebase's
     // force unit (N — same kg·m/s^2 system Robot::applyDriveForces uses for its
     // normal = mass * gravity / wheelCount). No further conversion.
-    m_friction = cfg.getFloat("/robot/dribbler/friction", 1.2f);
-    m_normalForce = cfg.getFloat("/robot/dribbler/normal_force", 0.6f);
+    m_friction = cfg.getFloat("/robot/dribbler/friction", 1.5f);
+    m_normalForce = cfg.getFloat("/robot/dribbler/normal_force", 1.0f);
 
     m_motorTimeConstant = cfg.getFloat("/robot/dribbler/motor_time_constant", 0.03f);
     m_loadSagGain = cfg.getFloat("/robot/dribbler/load_sag_gain", 0.4f);
     m_responseGain = cfg.getFloat("/robot/dribbler/response_gain", 0.4f);
+    m_centeringTimeConstant = cfg.getFloat("/robot/dribbler/centering_time_constant", 0.03f);
+    if (m_centeringTimeConstant <= 0.0f) m_centeringTimeConstant = 0.15f;
 }
 
 void Dribbler::setTargetSpeed(float speed)
@@ -82,10 +84,6 @@ void Dribbler::update(const Robot& robot, Ball& ball, float dt)
     // ---- Effective roller radius at this lateral contact (taper profile). ----
     float r = util::lerp(m_radiusCenter, m_radiusEdge, std::fabs(localZ) / halfLen);
 
-    // Roller surface velocity at the contact point (robot local frame): purely
-    // tangential, along local -X for positive speed (capture direction).
-    glm::vec3 rollerSurfLocal(-m_actualSpeed * r, 0.0f, 0.0f);
-
     // Contact point on the ball's surface: the point nearest the roller axis.
     // This is where the force is applied so Bullet derives the backspin torque
     // from the off-center application point automatically (no separate torque).
@@ -102,77 +100,99 @@ void Dribbler::update(const Robot& robot, Ball& ball, float dt)
     if (dist < 1e-4f) dist = 1e-4f;
     glm::vec3 contactOffsetLocal = (toRoller / dist) * ballRadius;
 
-    // Ball surface velocity at that contact point: linear velocity plus
-    // omega x contactOffset, computed in world then rotated into local.
-    glm::vec3 ballLinWorld(
-        ball.body()->getLinearVelocity().x(),
-        ball.body()->getLinearVelocity().y(),
-        ball.body()->getLinearVelocity().z());
-    glm::vec3 ballAngWorld(
-        ball.body()->getAngularVelocity().x(),
-        ball.body()->getAngularVelocity().y(),
-        ball.body()->getAngularVelocity().z());
     // contact offset local -> world
     glm::vec3 contactOffsetWorld(
         cosYaw * contactOffsetLocal.x + sinYaw * contactOffsetLocal.z,
         contactOffsetLocal.y,
         -sinYaw * contactOffsetLocal.x + cosYaw * contactOffsetLocal.z);
-    glm::vec3 surfWorld = ballLinWorld + glm::cross(ballAngWorld, contactOffsetWorld);
-    // world -> local
-    glm::vec3 surfLocal(
-        cosYaw * surfWorld.x - sinYaw * surfWorld.z,
-        surfWorld.y,
-        sinYaw * surfWorld.x + cosYaw * surfWorld.z);
+    btVector3 contactOffsetBt(contactOffsetWorld.x, contactOffsetWorld.y, contactOffsetWorld.z);
 
-    // Relative slip velocity (ball surface minus roller surface), projected
-    // onto the local X/Y plane. The roller does not constrain lateral (Z) slip
-    // — that's what lets the ball self-center along the taper rather than being
-    // rigidly pinned in Z.
-    glm::vec3 slipLocal = surfLocal - rollerSurfLocal;
-    slipLocal.z = 0.0f;
-
-    // Friction opposes the slip, so the deadbeat force is -mass * slip / dt
-    // (equivalently mass * (rollerSurf - ballSurf) / dt): it drives the ball's
-    // surface velocity *toward* the roller's. Same "target - actual" convention
-    // as Robot::applyDriveForces, where the roller surface is the "target" the
-    // captured ball should match.
+    // ---- Target contact-point velocity: "rigidly attached to the rotating
+    // pocket, centered, plus the roller's own spin". Three parts, all in
+    // world frame:
     //
-    // m_responseGain scales this down *before* the Coulomb clamp below, same
-    // role as Robot::applyDriveForces's m_frictionResponseGain: the raw
-    // one-step deadbeat force is almost always far above the friction limit
-    // for realistic slip speeds, so without this it saturates at the clamp
-    // every single frame regardless of how close the ball already is to the
-    // roller's target surface velocity — a bang-bang controller that was
-    // measured to pump energy into the ball's spin/position over ~1s of
-    // continuous capture until it errupted into a runaway lateral ejection
-    // with no turn commanded at all (docs/tasks/dribbler-kicker.md's own
-    // "don't script ejection" scenario, but happening spuriously instead of
-    // from an actual turn). Scaling the target down first means the clamp
-    // only bites under real, sustained slip (e.g. actually pulling a ball in
-    // from outside the zone), not on every frame of an already-captured ball.
+    // 1) Rigid-attachment: the velocity a point fixed to the robot at this
+    //    offset would have, V_robot + omega_robot x offset. This is what
+    //    makes turning cost something — holding the ball through a turn
+    //    means matching a centripetal/tangential demand that grows with
+    //    turn rate, so a fast enough turn saturates the Coulomb clamp below
+    //    and the ball falls behind (ejects) instead of being glued on
+    //    unconditionally. Same mechanism covers a hard reverse: a sudden
+    //    change in V_robot is a sudden change in this target that the
+    //    clamped force may not be able to track.
+    btVector3 robotLinWorld(robot.linearVelocityWorld().x, robot.linearVelocityWorld().y,
+                             robot.linearVelocityWorld().z);
+    btVector3 omegaWorld(0.0f, robot.angularVelocity(), 0.0f);
+    btVector3 rigidVelWorld = robotLinWorld + omegaWorld.cross(contactOffsetBt);
+
+    // 2) Centering: a spring-like pull, computed in the robot's local frame,
+    //    toward the middle of the pocket (forward_offset, lateral center 0).
+    //    This is what makes a ball that crosses into the capture zone snap
+    //    to the center of the pocket instead of just sitting wherever it
+    //    entered — entering the zone at all is what matters, not where in
+    //    it. Deliberately uses m_centeringTimeConstant here, *not* dt: a
+    //    "close this position error within one physics substep" target
+    //    (posErr/dt, dt ~4ms) demands target velocities in the m/s range for
+    //    even a few mm of error, which saturates the Coulomb clamp below on
+    //    every frame regardless of how small the error is — leaving no
+    //    budget left over to also satisfy the rigid-attachment (turning)
+    //    demand, so the ball ejected at even a gentle 1 rad/s turn in
+    //    testing. m_centeringTimeConstant caps the demanded velocity to a
+    //    physically reasonable "pocket pulls it back over ~0.1-0.2s" rate
+    //    instead, so the clamp isn't permanently maxed out just holding
+    //    still.
+    glm::vec3 posErrLocal(m_forwardOffset - localX, 0.0f, 0.0f - localZ);
+    glm::vec3 centeringLocal = posErrLocal / m_centeringTimeConstant;
+    btVector3 centeringWorld(
+        cosYaw * centeringLocal.x + sinYaw * centeringLocal.z,
+        0.0f,
+        -sinYaw * centeringLocal.x + cosYaw * centeringLocal.z);
+
+    // 3) Spin: roller surface target, local -X for positive speed (capture
+    //    direction pulls the contact point toward the robot).
+    btVector3 spinWorld(cosYaw * (-m_actualSpeed * r), 0.0f, -sinYaw * (-m_actualSpeed * r));
+
+    btVector3 targetVelWorld = rigidVelWorld + centeringWorld + spinWorld;
+
+    // ---- Ball's actual surface velocity at the contact point. ----
+    btVector3 ballLinWorld = ball.body()->getLinearVelocity();
+    btVector3 ballAngWorld = ball.body()->getAngularVelocity();
+    btVector3 surfVelWorld = ballLinWorld + ballAngWorld.cross(contactOffsetBt);
+
+    // Slip = actual - target. Vertical (Y) is excluded: gravity/ground
+    // contact already own the ball's height, the dribbler only grips the
+    // horizontal plane (position + rotation + spin), so it shouldn't fight
+    // small vertical bounce.
+    btVector3 slipWorld = surfVelWorld - targetVelWorld;
+    slipWorld.setY(0.0f);
+
+    // Deadbeat-toward-target force, damped by m_responseGain (same role as
+    // Robot::applyDriveForces's m_frictionResponseGain — the raw one-step
+    // force is almost always far above the friction limit, so without this
+    // it saturates the clamp every frame regardless of how small the actual
+    // slip is), then clamped to the Coulomb limit: this single clamp is the
+    // "прижимная сила" (pressing/grip force) budget shared by centering,
+    // co-rotating through a turn, and spin — there is no separate lateral
+    // allowance, so a strong enough combination of any of those (fast turn,
+    // hard reverse, big centering error) can exceed it and eject the ball,
+    // which keeps whatever spin it had at that instant (nothing here zeroes
+    // the ball's velocity/angular velocity on zone-exit, only the force
+    // stops being applied).
     float ballMass = ball.mass();
-    glm::vec3 forceLocal = -m_responseGain * (ballMass / dt) * slipLocal;
-    float mag = glm::length(forceLocal);
+    btVector3 forceWorld = -m_responseGain * (ballMass / dt) * slipWorld;
+    float mag = forceWorld.length();
     float maxMag = m_friction * m_normalForce;
     float appliedMag = mag;
     if (mag > maxMag && mag > 1e-6f) {
-        forceLocal *= maxMag / mag;
+        forceWorld *= maxMag / mag;
         appliedMag = maxMag;
     }
-
-    // local -> world force
-    glm::vec3 forceWorld(
-        cosYaw * forceLocal.x + sinYaw * forceLocal.z,
-        forceLocal.y,
-        -sinYaw * forceLocal.x + cosYaw * forceLocal.z);
 
     // Wake the ball so the force actually integrates (a settled, sleeping ball
     // ignores applied forces — same reason the kicker activates before its
     // impulse).
     ball.body()->activate(true);
-    ball.body()->applyForce(
-        btVector3(forceWorld.x, forceWorld.y, forceWorld.z),
-        btVector3(contactOffsetWorld.x, contactOffsetWorld.y, contactOffsetWorld.z));
+    ball.body()->applyForce(forceWorld, contactOffsetBt);
 
     // Load fraction = applied force relative to the Coulomb limit; feeds the
     // motor sag on the next frame.
