@@ -28,6 +28,13 @@ private:
     std::unique_ptr<btSequentialImpulseConstraintSolver> m_solver;
     std::unique_ptr<btDiscreteDynamicsWorld> m_world;
 
+    // Fixed internal substep size (see /physics/timestep) and how many of
+    // them stepSimulation may run to fully cover one frame's dt — sized so
+    // even App's own worst-case dt clamp (0.1s) is always fully caught up,
+    // never silently truncated. See Physics::step.
+    float m_fixedTimeStep = 0.004166f;
+    int   m_maxSubSteps = 60;
+
     std::unique_ptr<btRigidBody> m_groundBody;
 
     // Static field boundary walls + goal structures (side/back walls of both

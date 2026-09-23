@@ -1,6 +1,7 @@
 #include "physics.h"
 #include "renderer.h"
 #include "config.h"
+#include <cmath>
 #include <iostream>
 
 static const float MM = 1000.0f;
@@ -20,6 +21,12 @@ void Physics::init(Config& cfg)
 
     float grav = cfg.getFloat("/physics/gravity", 9810.0f) / MM;
     m_world->setGravity(btVector3(0, -grav, 0));
+
+    m_fixedTimeStep = cfg.getFloat("/physics/timestep", 0.004166f);
+    if (m_fixedTimeStep <= 0.0f) m_fixedTimeStep = 0.004166f;
+    // Enough substeps to fully cover App's own dt spike clamp (0.1s) with
+    // margin, so a slow frame never silently truncates simulated time.
+    m_maxSubSteps = (int)std::ceil(0.1f / m_fixedTimeStep) + 4;
 
     // Ground plane
     btCollisionShape* groundShape = new btStaticPlaneShape(btVector3(0, 1, 0), 0);
@@ -136,12 +143,19 @@ void Physics::init(Config& cfg)
 
 void Physics::step(float dt)
 {
-    // Single variable-timestep step per frame, so the per-frame wheel friction
-    // forces Robot::applyDriveForces applies are integrated over exactly the
-    // same dt they were computed for. (Bullet clears accumulated forces after
-    // each internal substep; stepping once per frame keeps the hand-rolled
-    // Coulomb model and the integrator in agreement.)
-    m_world->stepSimulation(dt, 0, 0.0f);
+    // Fixed-size internal substeps (previously a single variable-length step
+    // per frame — maxSubSteps=0), so fast bodies (the ball) and the now-solid
+    // walls/goals don't tunnel through each other or resolve a deep, one-shot
+    // penetration into a violent ejection ("robot/ball flies off the field").
+    // clearForces() only runs once, after all of Bullet's own internal
+    // substeps for this single stepSimulation() call, not per substep — so
+    // Robot::applyDriveForces's one-shot per-frame applyForce() still
+    // integrates to the same total impulse (F * dt) as the old single-step
+    // call, just spread across smaller, stable sub-intervals instead of one
+    // big one. Verified empirically after this change: forward/backward/
+    // strafe/turn magnitudes and the post-turn oscillation behavior from
+    // docs/tasks/omni-wheel-dynamics.md's tests are unchanged.
+    m_world->stepSimulation(dt, m_maxSubSteps, m_fixedTimeStep);
 }
 
 void Physics::shutdown()

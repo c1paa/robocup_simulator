@@ -54,6 +54,13 @@ void Ball::init(Config& cfg, btDiscreteDynamicsWorld* world)
     ci.m_linearDamping = linearDamping;
     ci.m_angularDamping = angularDamping;
     m_body = std::make_unique<btRigidBody>(ci);
+    // Continuous collision detection: a small, fast-moving sphere can move
+    // farther than its own radius within a single substep (e.g. a hard
+    // robot push) and tunnel straight through a thin (10mm) wall without
+    // ever registering contact under discrete detection alone. Motion past
+    // this threshold in one substep triggers a swept-sphere check.
+    m_body->setCcdMotionThreshold(m_radius);
+    m_body->setCcdSweptSphereRadius(m_radius * 0.5f);
     m_world->addRigidBody(m_body.get());
 
     m_position = glm::vec3(spawnX, spawnY, 0.0f);

@@ -106,6 +106,12 @@ void Robot::init(Config& cfg, btDiscreteDynamicsWorld* world)
     m_body->setAngularFactor(btVector3(0.0f, 1.0f, 0.0f)); // yaw only, no tipping
     m_body->setDamping(0.0f, 0.0f);
     m_body->setActivationState(DISABLE_DEACTIVATION);
+    // Continuous collision detection: at speed, the chassis can move farther
+    // than the thin (10mm) walls/goal boxes in a single substep and tunnel
+    // through them without ever registering contact under discrete detection
+    // alone. Same rationale as Ball — see ball.cpp.
+    m_body->setCcdMotionThreshold(radius);
+    m_body->setCcdSweptSphereRadius(radius * 0.5f);
     m_world->addRigidBody(m_body.get());
 
     m_position = glm::vec3(0.0f, halfH, 0.0f);
