@@ -40,12 +40,27 @@
             "time_constant": 0.05
         },
         "kicker": {
-            "max_power": 8.0,
-            "charge_time": 0.2
+            "max_power": 0.3,
+            "charge_time": 0.2,
+            "height_offset": 0.0,
+            "range": 40
         },
         "dribbler": {
             "max_speed": 1000.0,
-            "radius": 10
+            "radius_center": 8,
+            "radius_edge": 12,
+            "length": 70,
+            "forward_offset": 111,
+            "height_offset": 25,
+            "capture_tolerance_forward": 15,
+            "capture_tolerance_height": 10,
+            "friction": 0.6,
+            "normal_force": 0.15,
+            "motor_time_constant": 0.03,
+            "load_sag_gain": 0.4,
+            "lip_height": 6,
+            "lip_forward_offset": 88,
+            "lip_thickness": 10
         }
     },
     "camera": {

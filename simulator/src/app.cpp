@@ -6,6 +6,8 @@
 #include "ball.h"
 #include "camera.h"
 #include "lidar_sensor.h"
+#include "dribbler.h"
+#include "kicker.h"
 #include "config.h"
 #include "grpc_server.h"
 
@@ -52,6 +54,8 @@ bool App::init(const std::string& configDir)
     m_ball     = std::make_unique<Ball>();
     m_camera   = std::make_unique<Camera>();
     m_lidar    = std::make_unique<LidarSensor>();
+    m_dribbler = std::make_unique<Dribbler>();
+    m_kicker   = std::make_unique<Kicker>();
     m_grpc     = std::make_unique<GrpcServer>();
 
     m_physics->init(cfg);
@@ -60,11 +64,15 @@ bool App::init(const std::string& configDir)
     m_ball->init(cfg, m_physics->world());
     m_camera->init(cfg, m_robot->mirrorProfile(), m_robot->cameraHeight(), m_renderer.get());
     m_lidar->init(cfg, m_physics->world());
+    m_dribbler->init(cfg);
+    m_kicker->init(cfg);
     m_renderer->init(m_width, m_height);
     m_grpc->setRobot(m_robot.get());
     m_grpc->setCamera(m_camera.get());
     m_grpc->setLidar(m_lidar.get());
     m_grpc->setBall(m_ball.get());
+    m_grpc->setDribbler(m_dribbler.get());
+    m_grpc->setKicker(m_kicker.get());
     m_grpc->start();
 
     std::cout << "[App] Simulator ready." << std::endl;
@@ -307,8 +315,13 @@ void App::handleKeyboardInput(const Uint8* keys, float dt)
 
 void App::update(float dt)
 {
-    // Apply this frame's wheel friction forces before stepping physics, then
-    // read the robot's new transform back out after the step.
+    // Ordering matters: the dribbler capture force and the kicker impulse must
+    // be applied before m_physics->step(dt) so they take effect on the next
+    // stepSimulation (the dribbler's applyForce is consumed by the step; the
+    // kicker's applyImpulse changes velocity immediately). Same reason
+    // Robot::applyDriveForces runs before the step.
+    m_dribbler->update(*m_robot, *m_ball, dt);
+    m_kicker->update(dt);
     m_robot->applyDriveForces(dt);
     m_physics->step(dt);
     m_robot->syncFromPhysics();

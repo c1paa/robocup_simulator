@@ -64,6 +64,8 @@ grpc::Status SimulatorServiceImpl::SensorStream(
             data.set_ball_pos_x(m_state.ballPosition.x);
             data.set_ball_pos_y(m_state.ballPosition.y);
             data.set_ball_pos_z(m_state.ballPosition.z);
+            data.set_dribbler_rpm(m_state.dribblerRpm);
+            data.set_capacitor_charge(m_state.capacitorCharge);
             for (const LidarPoint& p : m_state.lidarPoints) {
                 robocup::LidarPoint* lp = data.add_lidar_points();
                 lp->set_angle(p.angle);

@@ -223,29 +223,47 @@ void Physics::debugDraw(Renderer& renderer)
         glm::mat4 model(1.0f);
         trans.getOpenGLMatrix(glm::value_ptr(model));
 
-        btCollisionShape* shape = body->getCollisionShape();
-        btVector3 halfExt;
-        glm::vec3 color(0.2f, 0.8f, 0.2f);
+        debugDrawShape(body->getCollisionShape(), model, renderer);
+    }
+}
 
-        switch (shape->getShapeType()) {
-        case BOX_SHAPE_PROXYTYPE:
-            halfExt = ((btBoxShape*)shape)->getHalfExtentsWithMargin();
-            renderer.drawBox(glm::vec3(halfExt.x(), halfExt.y(), halfExt.z()), model, color);
-            break;
-        case SPHERE_SHAPE_PROXYTYPE: {
-            float r = ((btSphereShape*)shape)->getRadius();
-            renderer.drawSphere(r, model, color);
-            break;
+void Physics::debugDrawShape(btCollisionShape* shape, const glm::mat4& model, Renderer& renderer)
+{
+    btVector3 halfExt;
+    glm::vec3 color(0.2f, 0.8f, 0.2f);
+
+    switch (shape->getShapeType()) {
+    case COMPOUND_SHAPE_PROXYTYPE: {
+        // The robot chassis is a btCompoundShape (cylinder + front lip box).
+        // btCompoundShape does not own its children; recurse into each child's
+        // own per-type draw code with its local transform composed under the
+        // body's world transform.
+        btCompoundShape* compound = static_cast<btCompoundShape*>(shape);
+        for (int i = 0; i < compound->getNumChildShapes(); i++) {
+            btTransform childTrans = compound->getChildTransform(i);
+            glm::mat4 childLocal(1.0f);
+            childTrans.getOpenGLMatrix(glm::value_ptr(childLocal));
+            debugDrawShape(compound->getChildShape(i), model * childLocal, renderer);
         }
-        case CYLINDER_SHAPE_PROXYTYPE: {
-            btVector3 ext = ((btCylinderShape*)shape)->getHalfExtentsWithMargin();
-            float r = std::max(ext.x(), ext.z());
-            float h = ext.y() * 2.0f;
-            renderer.drawCylinder(r, h, model, color);
-            break;
-        }
-        default:
-            break;
-        }
+        break;
+    }
+    case BOX_SHAPE_PROXYTYPE:
+        halfExt = ((btBoxShape*)shape)->getHalfExtentsWithMargin();
+        renderer.drawBox(glm::vec3(halfExt.x(), halfExt.y(), halfExt.z()), model, color);
+        break;
+    case SPHERE_SHAPE_PROXYTYPE: {
+        float r = ((btSphereShape*)shape)->getRadius();
+        renderer.drawSphere(r, model, color);
+        break;
+    }
+    case CYLINDER_SHAPE_PROXYTYPE: {
+        btVector3 ext = ((btCylinderShape*)shape)->getHalfExtentsWithMargin();
+        float r = std::max(ext.x(), ext.z());
+        float h = ext.y() * 2.0f;
+        renderer.drawCylinder(r, h, model, color);
+        break;
+    }
+    default:
+        break;
     }
 }

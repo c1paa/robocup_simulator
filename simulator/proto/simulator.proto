@@ -49,6 +49,13 @@ message SensorData {
     float ball_pos_x = 16;
     float ball_pos_y = 17;
     float ball_pos_z = 18;
+
+    // Dribbler motor's actual (lagged, load-sagged) speed, RPM, signed the same
+    // as dribble_speed (positive = capture direction).
+    float dribbler_rpm = 19;
+
+    // Kicker capacitor charge level, 0.0 (empty) to 1.0 (full).
+    float capacitor_charge = 20;
 }
 
 message LidarPoint {
@@ -66,11 +73,17 @@ message RobotCommand {
     float vy = 3;
     float omega = 4;
 
-    // Kicker
-    float kick_power = 5;    // 0.0 to 1.0
+    // Kicker: a power *request* in [0.0, 1.0]. The impulse actually delivered is
+    // min(kick_power, capacitor_charge) * max_power — firing drains the
+    // capacitor, which recharges over /robot/kicker/charge_time, so a kick
+    // requested before recharge completes is measurably weaker.
+    float kick_power = 5;
 
-    // Dribbler
-    float dribble_speed = 6; // -1.0 to 1.0
+    // Dribbler: roller speed command in [-1.0, 1.0]. Positive = capture
+    // direction (the roller surface at the ball contact point moves toward the
+    // robot, i.e. local -X, pulling a ball in and holding it); negative =
+    // eject direction. Magnitude scales to /robot/dribbler/max_speed RPM.
+    float dribble_speed = 6;
 
     double timestamp = 7;
 }

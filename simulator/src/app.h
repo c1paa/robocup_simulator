@@ -12,6 +12,8 @@ class Robot;
 class Ball;
 class Camera;
 class LidarSensor;
+class Dribbler;
+class Kicker;
 class GrpcServer;
 
 class App
@@ -50,6 +52,8 @@ private:
     std::unique_ptr<Ball> m_ball;
     std::unique_ptr<Camera> m_camera;
     std::unique_ptr<LidarSensor> m_lidar;
+    std::unique_ptr<Dribbler> m_dribbler;
+    std::unique_ptr<Kicker> m_kicker;
     std::unique_ptr<GrpcServer> m_grpc;
 
     // Timing

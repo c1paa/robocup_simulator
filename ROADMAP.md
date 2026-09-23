@@ -25,10 +25,11 @@ Ranked by what's most load-bearing for the project's actual purpose (feeding vis
 robot-control client) — do this roughly top to bottom, but treat it as a starting point to
 argue with, not a mandate.
 
-Items 1, 2, 3, 4 and 8 are **done** — see [`docs/tasks/mirror-camera-vision.md`](docs/tasks/mirror-camera-vision.md)
+Items 1, 2, 3, 4, 5 and 8 are **done** — see [`docs/tasks/mirror-camera-vision.md`](docs/tasks/mirror-camera-vision.md)
 (items 1–2), [`docs/tasks/ball-physics.md`](docs/tasks/ball-physics.md) (item 3, plus the
 wall/goal half of item 7), [`docs/tasks/omni-wheel-dynamics.md`](docs/tasks/omni-wheel-dynamics.md)
-(item 4) and [`docs/tasks/lidar-sensor.md`](docs/tasks/lidar-sensor.md) (item 8) for how they
+(item 4), [`docs/tasks/dribbler-kicker.md`](docs/tasks/dribbler-kicker.md) (item 5) and
+[`docs/tasks/lidar-sensor.md`](docs/tasks/lidar-sensor.md) (item 8) for how they
 were implemented.
 
 1. ~~gRPC server~~ — done (see above).
@@ -46,8 +47,18 @@ were implemented.
    separately-drifting odometry estimate. See
    [`docs/tasks/omni-wheel-dynamics.md`](docs/tasks/omni-wheel-dynamics.md).
 
-5. **Kicker / dribbler** — `Robot::kick()` and `Robot::dribble()` are no-ops. Proto already
-   carries `kick_power`/`dribble_speed`. Needs an actual effect once there's a ball to act on.
+5. ~~Kicker / dribbler~~ — done, with one known open issue: the dribbler roller is a
+   hand-rolled capture-force model (motor lag + load sag + tapered capture zone) and the kicker
+   is a simulated-capacitor impulse, both applied to the ball every frame before the physics
+   step. The robot chassis is now a `btCompoundShape` (chassis cylinder + a small front "lip"
+   that holds a resting ball). Verified empirically: approach/capture, hold-while-driving,
+   kick height/torque, capacitor drain+recharge, and forward/strafe regression all behave as
+   intended. **Not fixed**: a ball held stationary by the spinner for more than a few seconds
+   can drift sideways out of the capture zone with no turn commanded — a real conflict between
+   the dribbler's hand-rolled backspin and the ball's own real Bullet ground-rolling contact,
+   the same general class of issue as the sustained-contact chassis instability from `9e9a805`.
+   Mitigated (gentler default grip + a response-gain damping term) but not solved — see "Known
+   limitation" in [`docs/tasks/dribbler-kicker.md`](docs/tasks/dribbler-kicker.md).
 
 6. **Multi-robot support** — `App` holds a single `std::unique_ptr<Robot> m_robot`, but
    `SensorRequest`/`RobotCommand` already carry `robot_id`. If the target league needs more

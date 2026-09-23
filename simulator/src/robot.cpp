@@ -67,14 +67,45 @@ void Robot::init(Config& cfg, btDiscreteDynamicsWorld* world)
     M[2] = glm::vec3(-m_wheelR, -m_wheelR, -m_wheelR);
     m_invKinematics = glm::inverse(M);
 
-    // ---- Bullet rigid body (chassis cylinder) ----
+    // ---- Bullet rigid body (compound: chassis cylinder + front "lip" box) ----
+    // The lip is a small bump on the ground just in front of the chassis that
+    // holds a ball resting in the dribbler capture position when the roller is
+    // off (zero commanded speed => zero capture force) — see
+    // docs/tasks/dribbler-kicker.md. Children must outlive the compound, so
+    // they are owned here as separate members (btCompoundShape holds raw
+    // pointers and does not free them).
     float radius = m_diameter * 0.5f;
     float halfH  = m_height * 0.5f;
-    m_collisionShape = std::make_unique<btCylinderShape>(btVector3(radius, halfH, radius));
+
+    m_chassisShape = std::make_unique<btCylinderShape>(btVector3(radius, halfH, radius));
+
+    float lipHeight   = cfg.getFloat("/robot/dribbler/lip_height",        6.0f)  / MM;
+    float lipForward  = cfg.getFloat("/robot/dribbler/lip_forward_offset", 88.0f) / MM;
+    float lipThick    = cfg.getFloat("/robot/dribbler/lip_thickness",     10.0f)  / MM;
+    float dribblerLen = cfg.getFloat("/robot/dribbler/length",            70.0f)  / MM;
+    m_lipShape = std::make_unique<btBoxShape>(btVector3(
+        lipThick * 0.5f, lipHeight * 0.5f, dribblerLen * 0.5f));
+
+    m_collisionShape = std::make_unique<btCompoundShape>();
+    btTransform identity;
+    identity.setIdentity();
+    m_collisionShape->addChildShape(identity, m_chassisShape.get());
+
+    // Lip sits on the ground in front of the chassis: its bottom face is at the
+    // same height as the chassis bottom, i.e. local Y = -halfH (chassis local
+    // origin is its geometric center).
+    btTransform lipTransform;
+    lipTransform.setIdentity();
+    lipTransform.setOrigin(btVector3(lipForward, -halfH + lipHeight * 0.5f, 0.0f));
+    m_collisionShape->addChildShape(lipTransform, m_lipShape.get());
 
     btScalar mass = m_mass;
     btVector3 localInertia(0.0f, 0.0f, 0.0f);
-    m_collisionShape->calculateLocalInertia(mass, localInertia);
+    // Compute inertia from the *chassis* cylinder, not the compound's AABB, so
+    // this stays byte-identical to the pre-compound single-cylinder body (the
+    // lip shifts the AABB slightly and would change the default inertia /
+    // broadphase behavior otherwise).
+    m_chassisShape->calculateLocalInertia(mass, localInertia);
 
     // Yaw inertia about the vertical (Y) axis drives turning. The config key is
     // named "z" for the spin axis; absent/null means "solid-cylinder default".
@@ -126,16 +157,6 @@ void Robot::setBodyVelocity(float vx, float vy, float omega)
     m_targetVx    = std::clamp(vx,    -m_maxLinearSpeed,  m_maxLinearSpeed);
     m_targetVy    = std::clamp(vy,    -m_maxLinearSpeed,  m_maxLinearSpeed);
     m_targetOmega = std::clamp(omega, -m_maxAngularSpeed, m_maxAngularSpeed);
-}
-
-void Robot::kick(float power)
-{
-    (void)power;
-}
-
-void Robot::dribble(float speed)
-{
-    (void)speed;
 }
 
 void Robot::applyDriveForces(float dt)

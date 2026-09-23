@@ -1,5 +1,6 @@
 #pragma once
 
+#include "common.h"
 #include <btBulletDynamicsCommon.h>
 #include <memory>
 #include <vector>
@@ -22,6 +23,8 @@ public:
     btDiscreteDynamicsWorld* world() { return m_world.get(); }
 
 private:
+    void debugDrawShape(btCollisionShape* shape, const glm::mat4& model, Renderer& renderer);
+
     std::unique_ptr<btDefaultCollisionConfiguration> m_collisionConfig;
     std::unique_ptr<btCollisionDispatcher> m_dispatcher;
     std::unique_ptr<btBroadphaseInterface> m_broadphase;

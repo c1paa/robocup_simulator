@@ -40,6 +40,15 @@ Class responsibilities (see their headers for the exact interface):
   friction/restitution/rolling-friction/damping (no hand-rolled force model — unlike `Robot`),
   rendered in both the viewer and the robot's mirror-camera cubemap. See
   [`docs/tasks/ball-physics.md`](docs/tasks/ball-physics.md).
+- `Dribbler` — the front capture roller: a *hand-rolled* friction/centering force model applied
+  to the ball every frame (deliberately not a Bullet roller body — sustained cylinder-vs-sphere
+  contact was solver-unstable), with motor lag, load-based speed sag, and a tapered-roller
+  capture zone. Owned by `App` (needs both robot pose and ball state). See
+  [`docs/tasks/dribbler-kicker.md`](docs/tasks/dribbler-kicker.md).
+- `Kicker` — the solenoid kicker: an impulse (`applyImpulse` at the configured plunger-height
+  offset) capped by a capacitor charge that is actually simulated (drains on fire, recharges
+  over `charge_time`). Owned by `App`, same pattern as `Dribbler`. See
+  [`docs/tasks/dribbler-kicker.md`](docs/tasks/dribbler-kicker.md).
 - `MirrorProfile` — mirror shape (`cone`/`hyperbola`) as a profile function `r = f(h)`; the
   single source of truth for mirror geometry, used both for the drawn mesh (`Robot`) and the
   optics (`Camera`). See [`docs/tasks/mirror-camera-vision.md`](docs/tasks/mirror-camera-vision.md).

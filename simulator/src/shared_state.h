@@ -31,6 +31,11 @@ struct SharedState
     // Ball ground-truth position (meters)
     glm::vec3 ballPosition{0.0f, 0.0f, 0.0f};
 
+    // Dribbler motor's actual (lagged, load-sagged) speed (RPM, signed like
+    // dribble_speed) and kicker capacitor charge (0..1).
+    float dribblerRpm = 0.0f;
+    float capacitorCharge = 1.0f;
+
     // Dead-reckoning odometry (drifts from ground truth under slip)
     float odomX = 0.0f;
     float odomZ = 0.0f;

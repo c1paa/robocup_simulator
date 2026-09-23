@@ -19,6 +19,7 @@ void Ball::init(Config& cfg, btDiscreteDynamicsWorld* world)
     // kg with the same /1000 pattern but it is a different physical quantity.
     m_radius = cfg.getFloat("/physics/ball/radius", 21.5f) / MM;
     float mass = cfg.getFloat("/physics/ball/mass", 0.046f) / 1000.0f;
+    m_mass = mass;
     float friction = cfg.getFloat("/physics/ball/friction", 0.07f);
     float restitution = cfg.getFloat("/physics/ball/restitution", 0.8f);
     float rollingFriction = cfg.getFloat("/physics/ball/rolling_friction", 0.02f);

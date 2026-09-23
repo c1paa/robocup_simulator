@@ -5,6 +5,8 @@
 #include "ball.h"
 #include "camera.h"
 #include "lidar_sensor.h"
+#include "dribbler.h"
+#include "kicker.h"
 
 #include <grpcpp/grpcpp.h>
 #include <iostream>
@@ -61,8 +63,14 @@ void GrpcServer::update(float dt)
         std::lock_guard<std::mutex> lock(m_state.mtx);
         if (m_state.hasCommand && m_robot) {
             m_robot->setBodyVelocity(m_state.vx, m_state.vy, m_state.omega);
-            if (m_state.kickPower > 0.0f) m_robot->kick(m_state.kickPower);
-            m_robot->dribble(m_state.dribbleSpeed);
+            if (m_kicker && m_ball) {
+                if (m_state.kickPower > 0.0f) {
+                    m_kicker->requestKick(*m_robot, *m_ball, m_state.kickPower);
+                }
+            }
+            if (m_dribbler) {
+                m_dribbler->setTargetSpeed(m_state.dribbleSpeed);
+            }
             m_state.hasCommand = false;
         }
     }
@@ -91,6 +99,12 @@ void GrpcServer::update(float dt)
         }
         if (m_ball) {
             m_state.ballPosition = m_ball->position();
+        }
+        if (m_dribbler) {
+            m_state.dribblerRpm = m_dribbler->rpm();
+        }
+        if (m_kicker) {
+            m_state.capacitorCharge = m_kicker->charge();
         }
         m_state.timestamp = std::chrono::duration<double>(
             std::chrono::steady_clock::now().time_since_epoch()).count();

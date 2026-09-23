@@ -10,6 +10,8 @@ class Robot;
 class Ball;
 class Camera;
 class LidarSensor;
+class Dribbler;
+class Kicker;
 class SimulatorServiceImpl;
 
 class GrpcServer
@@ -26,6 +28,8 @@ public:
     void setCamera(Camera* camera) { m_camera = camera; }
     void setLidar(LidarSensor* lidar) { m_lidar = lidar; }
     void setBall(Ball* ball) { m_ball = ball; }
+    void setDribbler(Dribbler* dribbler) { m_dribbler = dribbler; }
+    void setKicker(Kicker* kicker) { m_kicker = kicker; }
 
 private:
     SharedState m_state;
@@ -36,4 +40,6 @@ private:
     Ball* m_ball = nullptr;
     Camera* m_camera = nullptr;
     LidarSensor* m_lidar = nullptr;
+    Dribbler* m_dribbler = nullptr;
+    Kicker* m_kicker = nullptr;
 };

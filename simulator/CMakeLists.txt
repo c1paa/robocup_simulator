@@ -87,6 +87,8 @@ set(SOURCES
     src/camera.cpp
     src/lidar_sensor.cpp
     src/mirror_profile.cpp
+    src/dribbler.cpp
+    src/kicker.cpp
     src/config.cpp
     src/grpc_server.cpp
     src/simulator_service.cpp

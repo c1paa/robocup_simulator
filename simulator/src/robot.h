@@ -21,8 +21,6 @@ public:
 
     // gRPC-to-robot commands (body-frame: vx forward, vy lateral, omega yaw)
     void setBodyVelocity(float vx, float vy, float omega);
-    void kick(float power);
-    void dribble(float speed);
 
     // Robot state (for gRPC)
     glm::vec3 position() const { return m_position; }
@@ -90,9 +88,11 @@ private:
     float m_cosTheta[kOmniWheels];
     glm::mat3 m_invKinematics = glm::mat3(1.0f);
 
-    // ---- Bullet rigid body ----
+    // ---- Bullet rigid body (compound: chassis cylinder + front lip box) ----
     btDiscreteDynamicsWorld* m_world = nullptr;
-    std::unique_ptr<btCollisionShape> m_collisionShape;
+    std::unique_ptr<btCylinderShape> m_chassisShape;
+    std::unique_ptr<btBoxShape> m_lipShape;
+    std::unique_ptr<btCompoundShape> m_collisionShape;
     std::unique_ptr<btDefaultMotionState> m_motionState;
     std::unique_ptr<btRigidBody> m_body;
 
