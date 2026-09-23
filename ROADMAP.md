@@ -34,7 +34,10 @@ Items 1, 2, 4 and 8 are **done** — see [`docs/tasks/mirror-camera-vision.md`](
 
 3. **Ball** — there is no ball anywhere in the codebase (`Physics`, `Field`, `Robot`). Configs
    already carry `physics.ball` (radius/mass/friction/restitution) unused. Needs a `Ball` type
-   (or similar) with a Bullet sphere rigid body, spawn position, and rendering.
+   (or similar) with a Bullet sphere rigid body, spawn position, and rendering. Also gives the
+   wall/goal boxes added for item 8 real collision response (currently raycast-only), which as
+   a side effect closes the wall/goal half of item 7 too. See
+   [`docs/tasks/ball-physics.md`](docs/tasks/ball-physics.md).
 
 4. ~~Robot ↔ physics integration~~ — done: the robot is a Bullet rigid body driven by a
    3-omni-wheel friction/slip model, with body-frame `vx`/`vy`/`omega` commands and a
