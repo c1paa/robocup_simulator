@@ -9,10 +9,13 @@ currently no-op stubs (`Robot::kick()` / `Robot::dribble()` in `simulator/src/ro
 (`/robot/kicker`, `/robot/dribbler`) — this task fills in the physics behind them, not the
 transport.
 
-**Status: implemented, reviewed, and revised** — the original review found the capture force
-model was missing an active centering pull and would spontaneously eject a stationary, untouched
-ball after ~1s. See "Force model revision" near the end of this doc for what changed and why
-before touching `/robot/dribbler/friction`, `normal_force`, or `centering_time_constant`.
+**Status: implemented, reviewed, and revised twice** — the original review found the capture
+force model was missing an active centering pull and would spontaneously eject a stationary,
+untouched ball after ~1s (see "Force model revision"). A later request added genuine pocket
+recession (the ball sits physically recessed into the chassis, not flush against it — see
+"Second revision"), which required shrinking the chassis's own collision geometry and removing
+the original "lip". Read both revision sections before touching `/robot/dribbler/friction`,
+`normal_force`, `centering_time_constant`, `forward_offset`, or `pocket_depth`.
 
 Read [`AGENTS.md`](../../AGENTS.md) first (units convention, yaw convention, config-access
 pattern) and [`docs/tasks/ball-physics.md`](ball-physics.md) / `simulator/src/ball.cpp` for how
@@ -365,6 +368,55 @@ the ball within a few hundred ms while it keeps spinning. The exact turn rate at
 lost is not perfectly crisp run-to-run (small, expected sensitivity in a clamped/saturating
 controller near its limit) — treat "~2 rad/s" as an approximate threshold, not a guarantee, if
 tuning further.
+
+## Second revision: real pocket recession, and the lip's replacement
+
+Follow-up request: the ball should visibly/physically sit recessed into the front of the robot
+by a configurable distance (default 15mm), matching how a real dribbler ball nestles into a
+concave pocket rather than resting flush against the chassis.
+
+The straightforward attempt — just moving `forward_offset` closer to the chassis center so the
+ball's target position overlaps the chassis by 15mm — reproduced exactly the bug class this doc
+already warns about: the chassis is a *real* Bullet collision cylinder, so it physically blocked
+the ball from ever reaching the new target, and the hand-rolled centering force fighting that
+real contact every frame shoved the ball around unpredictably during approach (not the earlier
+"spontaneous eject at rest" bug, but the same underlying cause — a hand-rolled force and real
+Bullet contact both trying to own the same space).
+
+Fix: the chassis's *collision* cylinder is now genuinely smaller than its rendered radius, by
+`pocket_depth` (`/robot/dribbler/pocket_depth`, default 15mm — see the comment in `Robot::init`).
+`forward_offset` is chosen so the captured ball's near surface lands exactly tangent to this
+shrunk radius, so it has real solid structure to rest against instead of empty space the
+hand-rolled force alone has to hold it in. This also makes the original compound shape's separate
+front "lip" child redundant — it existed only to give a resting, unpowered ball something solid
+to lean on, which the shrunk chassis now does on its own — so it was removed (`Robot` no longer
+has `m_lipShape`; the compound shape currently has one child). `/robot/dribbler/lip_height`,
+`lip_forward_offset`, and `lip_thickness` were removed from `robot.json` accordingly.
+
+The pocket's own shape — described as a concave arc, not a full circle, giving "some advantage"
+holding the ball through a turn — is modeled as a small bonus to the dribbler's effective grip
+budget (`pocket_grip_gain`, N per metre of `pocket_depth`, default 10 → +0.15N / +15% at the
+default 15mm), not as real cutout geometry (Bullet compound shapes can't represent a concave
+notch without a union of many convex pieces approximating it, which felt like a lot of geometry
+for a "small advantage" — see the simplification note in `Robot::init`'s comment). It still shares
+the one Coulomb clamp everything else does, per the first revision above.
+
+Known simplification, stated honestly rather than fixed silently: shrinking the whole chassis
+cylinder (rather than just a frontal notch/arc) means a ball — or, once multi-robot support
+exists, another robot — can in principle approach `pocket_depth` closer to the chassis from *any*
+side, not just the front. Harmless today (single robot, no robot-vs-robot collision yet).
+
+**A debugging note for whoever touches this next**: while chasing what first looked like a
+turn-ejection regression from this change, an already-present *uncommitted* local edit to
+`/robot/dribbler/max_speed` (1000 → 4000 RPM) and `radius_edge` (12 → 14mm) — unrelated to this
+task, apparently a manual tuning experiment via the keyboard dribbler control — turned out to be
+the actual cause: at 4000 RPM the roller's own spin demand alone saturates enough of the grip
+budget that even the *original* `forward_offset`/pocket-free geometry fails a 1 rad/s turn hold.
+Confirmed by isolating each changed variable independently (torque cap, pillars/camera
+rendering, the lip, `pocket_depth` itself — none of them reproduced it alone) against a `git
+stash`ed true baseline, three repeated runs each, before finding the real culprit. Left that
+`max_speed`/`radius_edge` edit as found (not this task's to revert) — but if dribbler behavior
+looks wrong again, check `robot.json` against `git diff` before assuming new code broke it.
 
 ## Docs to update when done
 

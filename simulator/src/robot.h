@@ -19,6 +19,13 @@ public:
     void render(Renderer& renderer);
     void renderBody(Renderer& renderer); // body + wheels only (no mirror/camera)
 
+    // What the robot's own mirror-camera actually sees below the mirror: real
+    // hardware is mostly an open frame there (wiring/PCB aside), held up by a
+    // few thin support pillars above the wheels — not the solid chassis
+    // cylinder renderBody() draws for the debug viewer. Used only in the
+    // camera capture pass (see App::render).
+    void renderCameraFrame(Renderer& renderer);
+
     // gRPC-to-robot commands (body-frame: vx forward, vy lateral, omega yaw)
     void setBodyVelocity(float vx, float vy, float omega);
 
@@ -27,6 +34,7 @@ public:
     float orientation() const { return m_yaw; }
     float velocity() const { return m_velocity; }
     float angularVelocity() const { return m_angularVelocity; }
+    float diameter() const { return m_diameter; } // m, for shadow-blob radius etc.
 
     // World-frame linear velocity vector (velocity() above is just its XZ
     // magnitude) — needed by Dribbler to compute the velocity a point
@@ -83,10 +91,12 @@ private:
     float m_wheelFrictionLateral = 0.15f;
     float m_frictionResponseGain = 0.4f;
 
-    // ---- Motor parameters ----
-    float m_maxLinearSpeed  = 3.0f;
-    float m_maxAngularSpeed = 6.28f;
+    // ---- Motor parameters (three MF4015v2 direct-drive BLDC motors, one per
+    // wheel — see the comment above the config reads in Robot::init) ----
+    float m_maxLinearSpeed  = 1.885f;
+    float m_maxAngularSpeed = 23.56f;
     float m_motorTimeConstant = 0.05f;
+    float m_motorPeakTorque = 0.65f; // N*m, caps per-wheel drive force regardless of ground friction
 
     // ---- Precomputed omni-wheel geometry (angles are fixed) ----
     float m_wheelR = 0.08f; // mounting radius = center_diameter / 2
@@ -94,10 +104,10 @@ private:
     float m_cosTheta[kOmniWheels];
     glm::mat3 m_invKinematics = glm::mat3(1.0f);
 
-    // ---- Bullet rigid body (compound: chassis cylinder + front lip box) ----
+    // ---- Bullet rigid body (compound: chassis cylinder, currently the only
+    // child — see the pocket_depth comment in Robot::init) ----
     btDiscreteDynamicsWorld* m_world = nullptr;
     std::unique_ptr<btCylinderShape> m_chassisShape;
-    std::unique_ptr<btBoxShape> m_lipShape;
     std::unique_ptr<btCompoundShape> m_collisionShape;
     std::unique_ptr<btDefaultMotionState> m_motionState;
     std::unique_ptr<btRigidBody> m_body;
@@ -107,6 +117,11 @@ private:
 
     // ---- Camera (looks up into mirror) ----
     float m_cameraHeight = 0.11f;
+
+    // ---- Camera-visible frame (support pillars, see renderCameraFrame) ----
+    int   m_pillarCount = 3;
+    float m_pillarWidth = 0.008f;
+    float m_pillarRadialOffset = 0.0f;
 
     // ---- Colors ----
     glm::vec3 m_bodyColor   = glm::vec3(0.1f, 0.3f, 0.8f);

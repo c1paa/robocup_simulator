@@ -18,6 +18,14 @@ for humans and AI agents alike.
   + odometry) and `SendCommand` (drive commands) over `localhost:<grpc_port>`
 - Real catadioptric mirror-camera rendering (`Camera` + `MirrorProfile`): cubemap capture +
   baked direction LUT → real, mirror-distorted image, streamed to clients
+- Configurable scene lighting (`/scene/light` in `project.json`) with real Lambertian shading
+  on every filled/lit draw (`Renderer::setLighting`, see AGENTS.md), a solid (not wireframe)
+  ball mesh so it's a real filled blob for OpenCV contour/color detection, and a cheap
+  per-object ground shadow (`Renderer::drawShadowBlob`) in both the viewer and the
+  mirror-camera's own capture — for training shadow/lighting-robustness in a vision pipeline,
+  not photorealism. The mirror-camera capture also renders the robot as just its 3 support
+  pillars (`Robot::renderCameraFrame`), not the full solid chassis the debug viewer shows —
+  real hardware's underside is mostly open there.
 
 ## Stubbed / not implemented
 
@@ -45,7 +53,10 @@ were implemented.
 4. ~~Robot ↔ physics integration~~ — done: the robot is a Bullet rigid body driven by a
    3-omni-wheel friction/slip model, with body-frame `vx`/`vy`/`omega` commands and a
    separately-drifting odometry estimate. See
-   [`docs/tasks/omni-wheel-dynamics.md`](docs/tasks/omni-wheel-dynamics.md).
+   [`docs/tasks/omni-wheel-dynamics.md`](docs/tasks/omni-wheel-dynamics.md). Motor limits
+   (`/robot/motor/max_linear_speed`/`max_angular_speed`/`peak_torque`) are derived from the real
+   MF4015v2 drive motors' published RPM/torque rating rather than placeholder round numbers —
+   see the comment above the config reads in `Robot::init`.
 
 5. ~~Kicker / dribbler~~ — done: the dribbler roller is a hand-rolled capture-force model
    (motor lag, load sag, tapered capture zone) that computes a single world-frame target
@@ -53,14 +64,19 @@ were implemented.
    to the center of the pocket, and the roller's own spin — all sharing one Coulomb-clamped grip
    budget, so a ball entering the zone snaps to dead center and stays there at rest, but a sharp
    enough turn or a hard reverse burst can genuinely eject it (keeping whatever spin it had).
-   The kicker is a simulated-capacitor impulse. Robot chassis is a `btCompoundShape` (cylinder +
-   a front "lip" that holds a resting, unpowered ball). Verified empirically via gRPC scripts:
-   centered capture, bounded rest stability (no drift), hold-while-driving, turn/reverse
-   ejection, kick height/torque, capacitor drain+recharge, forward/strafe regression. An earlier
-   version of the force model (no centering, no rotation-awareness) had a real bug where a
-   stationary captured ball would spontaneously eject after ~1s — fixed, not just mitigated; see
-   "Force model revision" in [`docs/tasks/dribbler-kicker.md`](docs/tasks/dribbler-kicker.md)
-   for what changed.
+   The kicker is a simulated-capacitor impulse. The captured ball sits genuinely recessed
+   (`/robot/dribbler/pocket_depth`, default 15mm) into the chassis — the chassis's *collision*
+   cylinder is shrunk by that much so the ball has real solid structure to rest against instead
+   of a hand-rolled force fighting a full-size collision cylinder for that space (the compound
+   shape's separate front "lip" child from the original design was removed, since the shrunk
+   chassis now serves the same "something to rest against when the dribbler is off" purpose on
+   its own). Verified empirically via gRPC scripts: centered capture at the recessed depth,
+   bounded rest stability (no drift), hold-while-driving, turn/reverse ejection, kick
+   height/torque, capacitor drain+recharge, forward/strafe/turn regression. An earlier version of
+   the force model (no centering, no rotation-awareness) had a real bug where a stationary
+   captured ball would spontaneously eject after ~1s — fixed, not just mitigated; see "Force
+   model revision" in [`docs/tasks/dribbler-kicker.md`](docs/tasks/dribbler-kicker.md) for what
+   changed.
 
 6. **Multi-robot support** — `App` holds a single `std::unique_ptr<Robot> m_robot`, but
    `SensorRequest`/`RobotCommand` already carry `robot_id`. If the target league needs more

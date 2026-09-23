@@ -67,6 +67,16 @@ bool App::init(const std::string& configDir)
     m_dribbler->init(cfg);
     m_kicker->init(cfg);
     m_renderer->init(m_width, m_height);
+    m_renderer->setLighting(
+        glm::vec3(cfg.getFloat("/scene/light/direction/0", 0.5f),
+                  cfg.getFloat("/scene/light/direction/1", -1.0f),
+                  cfg.getFloat("/scene/light/direction/2", 0.3f)),
+        glm::vec3(cfg.getFloat("/scene/light/ambient/0", 0.25f),
+                  cfg.getFloat("/scene/light/ambient/1", 0.25f),
+                  cfg.getFloat("/scene/light/ambient/2", 0.28f)),
+        glm::vec3(cfg.getFloat("/scene/light/diffuse/0", 0.85f),
+                  cfg.getFloat("/scene/light/diffuse/1", 0.83f),
+                  cfg.getFloat("/scene/light/diffuse/2", 0.78f)));
     m_grpc->setRobot(m_robot.get());
     m_grpc->setCamera(m_camera.get());
     m_grpc->setLidar(m_lidar.get());
@@ -353,7 +363,9 @@ void App::render()
     m_camera->renderView(m_robot->position(), m_robot->orientation(),
         [&](Renderer& r) {
             m_field->render(r);
-            m_robot->renderBody(r);
+            r.drawShadowBlob(m_ball->position(), m_ball->radius());
+            r.drawShadowBlob(m_robot->position(), m_robot->diameter() * 0.5f);
+            m_robot->renderCameraFrame(r); // pillars only, not the full body — see Robot.h
             m_ball->render(r);
         });
     glViewport(0, 0, m_width, m_height);
@@ -378,6 +390,8 @@ void App::render()
         m_renderer->drawGrid(gs, 1.0f);
     }
     m_field->render(*m_renderer);
+    m_renderer->drawShadowBlob(m_ball->position(), m_ball->radius());
+    m_renderer->drawShadowBlob(m_robot->position(), m_robot->diameter() * 0.5f);
     m_robot->render(*m_renderer);
     m_ball->render(*m_renderer);
     if (m_showPhysicsDebug) {

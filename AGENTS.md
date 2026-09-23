@@ -31,11 +31,23 @@ python/               Python/OpenCV demo client (`viewer.py`) + hardware-abstrac
 Class responsibilities (see their headers for the exact interface):
 
 - `App` — window/GL setup, main loop, viewer camera (orbit/pan/zoom), owns all subsystems.
-- `Renderer` — thin immediate-mode-style OpenGL wrapper (grid/line/box/sphere/cylinder/cone).
+- `Renderer` — thin immediate-mode-style OpenGL wrapper. `drawLine`/`drawBox`/`drawCylinder`/
+  `drawCone` are wireframe (debug-viewer geometry); `drawMesh`/`drawSphere`/`drawSolidBox` are
+  filled and lit (Lambertian, via `setLighting` — direction/ambient/diffuse are real uniforms set
+  every draw call, not GLSL default-initializers, which aren't portable). `drawShadowBlob` is a
+  cheap projected ground shadow (a flat disc multiplicatively darkening whatever's under it via
+  `GL_DST_COLOR`/`GL_ZERO` blending, not a real shadow map) for the mirror-camera's own scene.
 - `Physics` — Bullet world lifecycle.
-- `Field` — field geometry and rendering, driven entirely by config.
+- `Field` — field geometry and rendering, driven entirely by config; already used filled/lit
+  meshes for the floor/walls/goals before `Renderer`'s lighting became configurable.
 - `Robot` — single robot's dynamics (Bullet rigid body + 3-omni-wheel friction/slip model),
-  geometry, and rendering; owns the `MirrorProfile` and the dead-reckoning odometry estimate.
+  geometry, and rendering; owns the `MirrorProfile` and the dead-reckoning odometry estimate. The
+  chassis's *collision* cylinder is intentionally smaller than its rendered radius (by
+  `/robot/dribbler/pocket_depth`) so a captured ball can sit partly recessed into the front of the
+  robot instead of flush against it — see the comment in `Robot::init` and `Dribbler::init`'s
+  `forward_offset` derivation. `renderCameraFrame` (used only by the mirror-camera capture pass,
+  not `render`/`renderBody`) draws just the support pillars above the wheels instead of the full
+  solid body — real hardware's underside is mostly open there.
 - `Ball` — the (golf) ball: a plain Bullet `btSphereShape` dynamic rigid body with stock
   friction/restitution/rolling-friction/damping (no hand-rolled force model — unlike `Robot`),
   rendered in both the viewer and the robot's mirror-camera cubemap. See

@@ -16,10 +16,21 @@ void Dribbler::init(Config& cfg)
     m_radiusCenter = cfg.getFloat("/robot/dribbler/radius_center", 8.0f)  / MM;
     m_radiusEdge   = cfg.getFloat("/robot/dribbler/radius_edge",   12.0f) / MM;
     m_length        = cfg.getFloat("/robot/dribbler/length",        70.0f) / MM;
-    m_forwardOffset = cfg.getFloat("/robot/dribbler/forward_offset", 95.0f) / MM;
+    // forward_offset is chosen so the captured ball's *center* settles this
+    // far forward, which puts its near surface (forward_offset - ballRadius)
+    // pocket_depth mm inside the chassis's nominal circle (radius = diameter
+    // / 2) — a real dribbler ball sits partly recessed into the robot, not
+    // flush against it. Default: chassisRadius(90) - pocket_depth(15) +
+    // ballRadius(21.5) = 96.5mm. This is a manually-derived constant, not
+    // computed from /robot/diameter or /physics/ball/radius at load time
+    // (same style as lip_forward_offset below) — if you change the chassis
+    // diameter, ball radius, or pocket_depth, recompute this by hand.
+    m_forwardOffset = cfg.getFloat("/robot/dribbler/forward_offset", 96.5f) / MM;
     m_heightOffset  = cfg.getFloat("/robot/dribbler/height_offset",  15.0f) / MM;
     m_captureToleranceForward = cfg.getFloat("/robot/dribbler/capture_tolerance_forward", 15.0f) / MM;
     m_captureToleranceHeight  = cfg.getFloat("/robot/dribbler/capture_tolerance_height",  10.0f) / MM;
+    m_pocketDepth = cfg.getFloat("/robot/dribbler/pocket_depth", 15.0f) / MM;
+    m_pocketGripGain = cfg.getFloat("/robot/dribbler/pocket_grip_gain", 10.0f);
 
     // friction is dimensionless; normal_force is already in the codebase's
     // force unit (N — same kg·m/s^2 system Robot::applyDriveForces uses for its
@@ -178,10 +189,18 @@ void Dribbler::update(const Robot& robot, Ball& ball, float dt)
     // which keeps whatever spin it had at that instant (nothing here zeroes
     // the ball's velocity/angular velocity on zone-exit, only the force
     // stops being applied).
+    // The pocket the ball sits in isn't a full circle (see docs) — its
+    // concave walls geometrically resist lateral escape a little on top of
+    // whatever force the roller itself provides, modeled as a small bonus to
+    // the effective normal force (not a separate allowance outside the
+    // shared clamp — see the "one Coulomb clamp" note in
+    // docs/tasks/dribbler-kicker.md, still true here).
+    float effectiveNormalForce = m_normalForce + m_pocketDepth * m_pocketGripGain;
+
     float ballMass = ball.mass();
     btVector3 forceWorld = -m_responseGain * (ballMass / dt) * slipWorld;
     float mag = forceWorld.length();
-    float maxMag = m_friction * m_normalForce;
+    float maxMag = m_friction * effectiveNormalForce;
     float appliedMag = mag;
     if (mag > maxMag && mag > 1e-6f) {
         forceWorld *= maxMag / mag;

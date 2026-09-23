@@ -43,6 +43,13 @@ private:
     float m_captureToleranceHeight  = 0.010f; // m, +/- height slack around height_offset
     float m_friction = 1.5f;           // Coulomb coefficient (roller vs ball)
     float m_normalForce = 1.0f;        // N, effective press force between roller and ball
+    float m_pocketDepth = 0.015f;      // m, how far the ball sits inside the chassis's nominal
+                                        // circle when captured (see forward_offset's derivation
+                                        // comment in Dribbler::init)
+    float m_pocketGripGain = 10.0f;    // N per metre of pocket_depth: the pocket's own concave
+                                        // shape (not a full circle — see docs) geometrically
+                                        // resists lateral escape a little on top of the roller's
+                                        // own force, modeled as a small bonus to normal_force
     float m_motorTimeConstant = 0.03f; // s, first-order lag
     float m_loadSagGain = 0.4f;        // 0..1, speed lost when a ball loads the roller
     float m_responseGain = 0.4f;       // 0..1, see Robot::applyDriveForces's m_frictionResponseGain

@@ -36,10 +36,28 @@ void Robot::init(Config& cfg, btDiscreteDynamicsWorld* world)
     // Camera
     m_cameraHeight = cfg.getFloat("/robot/camera/height", 110.0f) / MM;
 
-    // Motor
-    m_maxLinearSpeed   = cfg.getFloat("/robot/motor/max_linear_speed",  3000.0f) / MM;
-    m_maxAngularSpeed  = cfg.getFloat("/robot/motor/max_angular_speed", 6.28f);
+    // Motor: three MF4015v2 direct-drive BLDC "gimbal" motors, one per wheel
+    // (no gearbox — consistent with this robot's tiny 48mm wheels). Per
+    // publicly listed specs for this motor family (LKTech/MyActuator
+    // RMD-L-4015 — robotshop.com/amazon.com listings, no first-party
+    // datasheet found): 750 RPM continuous rated speed, 0.25 N*m continuous /
+    // 0.65 N*m peak torque, 116g, 7.4-32V. max_linear_speed/max_angular_speed
+    // below are 750 RPM converted through the configured wheel geometry (same
+    // single-scalar-cap approximation applyDriveForces already uses for
+    // vx/vy/omega, not a true per-wheel bound) — this replaces the previous
+    // placeholder top-speed values (3000mm/s, 6.28 rad/s), which let the
+    // robot move/spin far faster than these motors actually could.
+    // time_constant is deliberately left at the pre-existing 0.05s, not
+    // re-derived from the motor: m_frictionResponseGain below was tuned
+    // empirically against this exact lag (see its own comment), and slowing
+    // it to e.g. 0.12s was measured to destabilize straight-line driving —
+    // a pure vx burst curved hard and spiked to ~0.7 rad of spurious yaw
+    // within ~1.5s. Not safe to change without re-tuning the response gain
+    // alongside it, which is out of scope here.
+    m_maxLinearSpeed   = cfg.getFloat("/robot/motor/max_linear_speed",  1885.0f) / MM;
+    m_maxAngularSpeed  = cfg.getFloat("/robot/motor/max_angular_speed", 23.56f);
     m_motorTimeConstant = cfg.getFloat("/robot/motor/time_constant", 0.05f);
+    m_motorPeakTorque   = cfg.getFloat("/robot/motor/peak_torque", 0.65f);
 
     // Physics. Note: mass is configured in *grams*, not millimetres — it is
     // converted to kg with the same / 1000 pattern as mm -> m, but it is a
@@ -59,6 +77,13 @@ void Robot::init(Config& cfg, btDiscreteDynamicsWorld* world)
         m_sinTheta[i] = std::sin(theta);
         m_cosTheta[i] = std::cos(theta);
     }
+
+    // ---- Camera-visible frame: support pillars above the wheels, holding
+    // the mirror (see renderCameraFrame). Defaults to one pillar per wheel,
+    // at the wheels' own mounting radius/azimuth.
+    m_pillarCount = cfg.getInt("/robot/frame/pillar_count", m_wheelCount);
+    m_pillarWidth = cfg.getFloat("/robot/frame/pillar_width", 8.0f) / MM;
+    m_pillarRadialOffset = cfg.getFloat("/robot/frame/pillar_radial_offset", 0.0f) / MM;
     // Inverse-kinematics matrix: math rows are (-sin_i, cos_i, R). glm is
     // column-major, so M[j] is column j = (row0[j], row1[j], row2[j]).
     glm::mat3 M(1.0f);
@@ -67,50 +92,45 @@ void Robot::init(Config& cfg, btDiscreteDynamicsWorld* world)
     M[2] = glm::vec3(-m_wheelR, -m_wheelR, -m_wheelR);
     m_invKinematics = glm::inverse(M);
 
-    // ---- Bullet rigid body (compound: chassis cylinder + front "lip" box) ----
-    // The lip is a small bump on the ground just in front of the chassis that
-    // holds a ball resting in the dribbler capture position when the roller is
-    // off (zero commanded speed => zero capture force) — see
-    // docs/tasks/dribbler-kicker.md. Children must outlive the compound, so
-    // they are owned here as separate members (btCompoundShape holds raw
-    // pointers and does not free them).
+    // ---- Bullet rigid body (compound: chassis cylinder, currently the only
+    // child) ----
+    // Children must outlive the compound, so they are owned here as separate
+    // members (btCompoundShape holds raw pointers and does not free them).
     float radius = m_diameter * 0.5f;
     float halfH  = m_height * 0.5f;
 
-    m_chassisShape = std::make_unique<btCylinderShape>(btVector3(radius, halfH, radius));
+    // The chassis's *collision* radius is intentionally smaller than its
+    // rendered/nominal radius, by pocket_depth: a real dribbler ball sits
+    // partly recessed into the front of the robot ("лунка"), not flush
+    // against a full-radius cylinder, and Dribbler's forward_offset (see its
+    // own init) is chosen so the captured ball's near surface lands exactly
+    // on this shrunk radius — giving it real solid structure to rest against
+    // (serving the purpose a separate "lip" bump used to) instead of the
+    // hand-rolled capture force fighting a full-size solid cylinder for that
+    // last pocket_depth of penetration every frame (the same "hand-rolled
+    // force vs. real Bullet contact" instability class documented in
+    // docs/tasks/dribbler-kicker.md's "Force model revision" — this is that
+    // same bug, hit again during a later revision, fixed the same way: don't
+    // make the hand-rolled force fight real contact for the same space).
+    // Known simplification: this shrinks the *whole* cylinder uniformly, not
+    // just a frontal notch/arc (a true partial-circle pocket would need a
+    // compound of many convex pieces to approximate a concave cutout, which
+    // Bullet shapes can't represent directly) — so a ball or wall can in
+    // principle approach pocket_depth closer to the chassis on any side, not
+    // just the front. Harmless today (single robot, no robot-vs-robot
+    // collision yet), but worth revisiting if that changes.
+    float pocketDepth = cfg.getFloat("/robot/dribbler/pocket_depth", 15.0f) / MM;
+    float collisionRadius = std::max(radius - pocketDepth, radius * 0.5f);
 
-    float lipHeight   = cfg.getFloat("/robot/dribbler/lip_height",        6.0f)  / MM;
-    // Deliberately kept well clear of the dribbler's capture equilibrium
-    // (forward_offset, ~111mm by default): the lip and the actively-captured
-    // ball's near surface used to overlap, so real Bullet contact resolution
-    // between them fought the dribbler's own hand-rolled force every frame
-    // and leaked a spurious, slowly growing robot yaw — see
-    // docs/tasks/dribbler-kicker.md's "Known limitation".
-    float lipForward  = cfg.getFloat("/robot/dribbler/lip_forward_offset", 70.0f) / MM;
-    float lipThick    = cfg.getFloat("/robot/dribbler/lip_thickness",     10.0f)  / MM;
-    float dribblerLen = cfg.getFloat("/robot/dribbler/length",            70.0f)  / MM;
-    m_lipShape = std::make_unique<btBoxShape>(btVector3(
-        lipThick * 0.5f, lipHeight * 0.5f, dribblerLen * 0.5f));
+    m_chassisShape = std::make_unique<btCylinderShape>(btVector3(collisionRadius, halfH, collisionRadius));
 
     m_collisionShape = std::make_unique<btCompoundShape>();
     btTransform identity;
     identity.setIdentity();
     m_collisionShape->addChildShape(identity, m_chassisShape.get());
 
-    // Lip sits on the ground in front of the chassis: its bottom face is at the
-    // same height as the chassis bottom, i.e. local Y = -halfH (chassis local
-    // origin is its geometric center).
-    btTransform lipTransform;
-    lipTransform.setIdentity();
-    lipTransform.setOrigin(btVector3(lipForward, -halfH + lipHeight * 0.5f, 0.0f));
-    m_collisionShape->addChildShape(lipTransform, m_lipShape.get());
-
     btScalar mass = m_mass;
     btVector3 localInertia(0.0f, 0.0f, 0.0f);
-    // Compute inertia from the *chassis* cylinder, not the compound's AABB, so
-    // this stays byte-identical to the pre-compound single-cylinder body (the
-    // lip shifts the AABB slightly and would change the default inertia /
-    // broadphase behavior otherwise).
     m_chassisShape->calculateLocalInertia(mass, localInertia);
 
     // Yaw inertia about the vertical (Y) axis drives turning. The config key is
@@ -211,6 +231,17 @@ void Robot::applyDriveForces(float dt)
 
     float maxRolling = m_wheelFrictionDriven * normal;
     float maxLateral = m_wheelFrictionLateral * normal;
+
+    // The motor itself can't push harder than its peak torque regardless of
+    // ground friction — cap the rolling force by torque/wheelRadius too, so
+    // driving force stays physically bounded by the real MF4015v2 even if
+    // wheel_friction_driven (or the ground friction) is tuned up later. With
+    // the current defaults this doesn't actually bind (friction is the
+    // tighter limit), it's a correctness floor, not the active constraint.
+    float wheelRadius = m_wheelDiameter * 0.5f;
+    if (wheelRadius > 1e-6f) {
+        maxRolling = std::min(maxRolling, m_motorPeakTorque / wheelRadius);
+    }
 
     // Desired force per wheel that would close each slip gap this step,
     // computed first for all wheels so the Coulomb limit can be applied as a
@@ -387,5 +418,35 @@ void Robot::renderBody(Renderer& renderer)
         // Combine with robot world transform
         glm::mat4 wheelModel = model * wheelLocal;
         renderer.drawCylinder(wheelRadius, 0.01f, wheelModel, m_wheelColor);
+    }
+}
+
+void Robot::renderCameraFrame(Renderer& renderer)
+{
+    glm::mat4 model = glm::translate(glm::mat4(1.0f), m_position);
+    model = glm::rotate(model, m_yaw, glm::vec3(0.0f, 1.0f, 0.0f));
+
+    // Pillars span from ground level (chassis bottom) up to the mirror's
+    // base — the real hardware's body is mostly open below the mirror,
+    // supported by a few thin poles above the wheels rather than a solid
+    // chassis wall, so that's what the camera should actually see (see the
+    // header comment on this method).
+    float bodyHalf = m_height * 0.5f;
+    float bottomLocalY = -bodyHalf;
+    float topLocalY = m_mirror.baseHeight() - bodyHalf;
+    float pillarHeight = topLocalY - bottomLocalY;
+    float centerLocalY = (topLocalY + bottomLocalY) * 0.5f;
+    float halfW = m_pillarWidth * 0.5f;
+    float dist = m_wheelCenterDiameter * 0.5f + m_pillarRadialOffset;
+
+    float angleStep = (2.0f * glm::pi<float>()) / (float)m_pillarCount;
+    for (int i = 0; i < m_pillarCount; i++) {
+        float angle = m_theta0 + (float)i * angleStep;
+        float dx = std::cos(angle) * dist;
+        float dz = std::sin(angle) * dist;
+
+        glm::mat4 pillarLocal = glm::translate(glm::mat4(1.0f), glm::vec3(dx, centerLocalY, dz));
+        glm::mat4 pillarModel = model * pillarLocal;
+        renderer.drawSolidBox(glm::vec3(halfW, pillarHeight * 0.5f, halfW), pillarModel, m_wheelColor);
     }
 }

@@ -35,9 +35,18 @@
             "dropout_probability": 0.01
         },
         "motor": {
-            "max_linear_speed": 3000,
-            "max_angular_speed": 6.28,
+            "model": "MF4015v2",
+            "max_rpm": 750,
+            "rated_torque": 0.25,
+            "peak_torque": 0.65,
+            "max_linear_speed": 1885,
+            "max_angular_speed": 23.56,
             "time_constant": 0.05
+        },
+        "frame": {
+            "pillar_count": 3,
+            "pillar_width": 8,
+            "pillar_radial_offset": 0
         },
         "kicker": {
             "max_power": 0.3,
@@ -46,21 +55,20 @@
             "range": 40
         },
         "dribbler": {
-            "max_speed": 1000.0,
+            "max_speed": 4000.0,
             "radius_center": 8,
-            "radius_edge": 12,
+            "radius_edge": 14,
             "length": 70,
-            "forward_offset": 111,
+            "forward_offset": 96.5,
             "height_offset": 25,
             "capture_tolerance_forward": 15,
             "capture_tolerance_height": 10,
+            "pocket_depth": 15,
+            "pocket_grip_gain": 10.0,
             "friction": 1.5,
             "normal_force": 1.0,
             "motor_time_constant": 0.03,
             "load_sag_gain": 0.4,
-            "lip_height": 6,
-            "lip_forward_offset": 70,
-            "lip_thickness": 10,
             "response_gain": 0.4,
             "centering_time_constant": 0.03
         }
