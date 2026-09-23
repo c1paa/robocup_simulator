@@ -9,7 +9,10 @@ void LidarSensor::init(Config& cfg, btDiscreteDynamicsWorld* world)
 {
     m_world = world;
 
-    m_height    = cfg.getFloat("/robot/lidar/height", 170.0f) / MM;
+    // Default kept below field.goal_height (100mm) so the scan plane actually
+    // clips the goal structures instead of passing over them — see
+    // docs/tasks/lidar-sensor.md.
+    m_height    = cfg.getFloat("/robot/lidar/height", 50.0f) / MM;
     m_minRange  = cfg.getFloat("/robot/lidar/min_range", 20.0f) / MM;
     m_maxRange  = cfg.getFloat("/robot/lidar/max_range", 12000.0f) / MM;
     m_pointsPerScan = cfg.getInt("/robot/lidar/points_per_scan", 450);

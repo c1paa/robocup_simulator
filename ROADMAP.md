@@ -52,15 +52,18 @@ Items 1, 2, 4 and 8 are **done** — see [`docs/tasks/mirror-camera-vision.md`](
 
 7. **Field collision** — walls/goals are drawn (`Field::render`) but have no Bullet collision
    shapes, so nothing currently stops the robot or a future ball from leaving the field.
-   The four boundary walls now have static collision boxes (raycast targets only — see item 8),
-   but full collision *response* for the robot/ball is still open.
+   The four boundary walls and both goal structures (side + back walls) now have static
+   collision boxes (raycast targets only — see item 8), but full collision *response* for the
+   robot/ball is still open.
 
 8. ~~LiDAR sensor + Python hardware-abstraction seed~~ — done: an LD06-like 360° 2D scanning
    lidar (`LidarSensor`, Bullet raycast sweep with range/rate/noise/dropout matched to the real
    sensor) streamed over gRPC via `SensorData.lidar_points`, plus a `python/robot_hal.py`
    (`SimRobotHAL`) wrapping all sensor/command access. Added static raycast-only collision boxes
-   for the four field boundary walls (a slice of item 7) as the lidar target. See
-   [`docs/tasks/lidar-sensor.md`](docs/tasks/lidar-sensor.md).
+   for the four field boundary walls and both goal structures (a slice of item 7) as lidar
+   targets — the lidar mount height (`robot.lidar.height`, default 50mm) is deliberately kept
+   below `field.goal_height` (100mm) so the scan plane actually clips the goals instead of
+   passing over them. See [`docs/tasks/lidar-sensor.md`](docs/tasks/lidar-sensor.md).
 
 ## Not urgent
 

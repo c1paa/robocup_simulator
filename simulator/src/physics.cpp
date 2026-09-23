@@ -57,7 +57,61 @@ void Physics::init(Config& cfg)
         { btVector3( hl,   halfH, 0.0f), btVector3(halfT, halfH, hw)     }, // right (x = +hl)
     };
 
+    // Goal structures: two side walls + a back wall per goal, sized/positioned
+    // from the same /field/goal_* values Field::render's drawGoal lambda uses,
+    // so the drawn goals and the raycast targets coincide. Same raycast-only
+    // treatment as the boundary walls above (CF_NO_CONTACT_RESPONSE) — full
+    // collision response for the robot/ball is still ROADMAP item 7.
+    float boundaryWidth = cfg.getFloat("/field/boundary_width",      300.0f) / MM;
+    float goalWidth      = cfg.getFloat("/field/goal_width",         1000.0f) / MM;
+    float goalDepth       = cfg.getFloat("/field/goal_depth",          180.0f) / MM;
+    float goalHeight      = cfg.getFloat("/field/goal_height",         160.0f) / MM;
+    float goalWallOffset  = cfg.getFloat("/field/goal_wall_offset",      0.0f) / MM;
+    float goalWallThick   = cfg.getFloat("/field/goal_wall_thickness",  10.0f) / MM;
+
+    float playHalfLength = hl - boundaryWidth;
+    float ghw            = goalWidth * 0.5f;
+    float goalHalfH       = goalHeight * 0.5f;
+    float goalHalfT       = goalWallThick * 0.5f;
+
+    std::vector<Wall> goalWalls;
+    for (float sign : {-1.0f, 1.0f}) {
+        float gx  = sign * (playHalfLength + goalWallOffset); // goal mouth (front)
+        float gbx = gx + sign * goalDepth;                    // back wall inner face
+        float obx = gbx + sign * goalWallThick;               // back wall outer face
+
+        // Side walls (left z<0, right z>0), spanning front (gx) to back outer (obx).
+        float sideHalfX = std::fabs(obx - gx) * 0.5f;
+        float sideCenterX = (gx + obx) * 0.5f;
+        for (float zSign : {-1.0f, 1.0f}) {
+            float zCenter = zSign * (ghw + goalHalfT);
+            goalWalls.push_back({ btVector3(sideCenterX, goalHalfH, zCenter),
+                                   btVector3(sideHalfX, goalHalfH, goalHalfT) });
+        }
+
+        // Back wall, spanning the outer faces of both side walls.
+        float backHalfX = goalWallThick * 0.5f;
+        float backCenterX = gbx + sign * backHalfX;
+        goalWalls.push_back({ btVector3(backCenterX, goalHalfH, 0.0f),
+                               btVector3(backHalfX, goalHalfH, ghw + goalWallThick) });
+    }
+
     for (const Wall& w : walls) {
+        auto shape = std::make_unique<btBoxShape>(w.halfExtents);
+        auto motion = std::make_unique<btDefaultMotionState>(
+            btTransform(btQuaternion::getIdentity(), w.center));
+        btRigidBody::btRigidBodyConstructionInfo ci(0.0f, motion.get(), shape.get());
+        auto body = std::make_unique<btRigidBody>(ci);
+        body->setCollisionFlags(body->getCollisionFlags() |
+                                btCollisionObject::CF_STATIC_OBJECT |
+                                btCollisionObject::CF_NO_CONTACT_RESPONSE);
+        m_world->addRigidBody(body.get());
+        m_wallShapes.push_back(std::move(shape));
+        m_wallMotionStates.push_back(std::move(motion));
+        m_wallBodies.push_back(std::move(body));
+    }
+
+    for (const Wall& w : goalWalls) {
         auto shape = std::make_unique<btBoxShape>(w.halfExtents);
         auto motion = std::make_unique<btDefaultMotionState>(
             btTransform(btQuaternion::getIdentity(), w.center));
