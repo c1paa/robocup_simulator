@@ -280,8 +280,12 @@ void App::handleKeyboardInput(const Uint8* keys, float dt)
     float drive = 0.0f, strafe = 0.0f, turn = 0.0f;
     if (keys[SDL_SCANCODE_UP])    drive += 1.0f;
     if (keys[SDL_SCANCODE_DOWN])  drive -= 1.0f;
-    if (keys[SDL_SCANCODE_LEFT])  turn  -= 1.0f;
-    if (keys[SDL_SCANCODE_RIGHT]) turn  += 1.0f;
+    // Signs here are the manual-drive keybinding only (arbitrary by nature,
+    // just needs to match what feels intuitive from the viewer window) — not
+    // the underlying omega/yaw convention, which stays as documented in
+    // AGENTS.md and is what the lidar/camera/odometry all agree on.
+    if (keys[SDL_SCANCODE_LEFT])  turn  += 1.0f;
+    if (keys[SDL_SCANCODE_RIGHT]) turn  -= 1.0f;
     if (keys[SDL_SCANCODE_Q])     strafe -= 1.0f;
     if (keys[SDL_SCANCODE_E])     strafe += 1.0f;
 
