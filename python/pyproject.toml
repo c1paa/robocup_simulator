@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "robocup-sim-client"
+version = "0.1.0"
+description = "Client HAL for the robocup_sumilator gRPC simulator (SimRobotHAL): drive commands, camera, lidar, dribbler, kicker, pose/odometry."
+requires-python = ">=3.8"
+dependencies = [
+    "grpcio",
+    "grpcio-tools",
+    "numpy",
+]
+
+[project.optional-dependencies]
+# Only needed to run viewer.py / lidar_viewer.py, not to use SimRobotHAL itself.
+demo = ["opencv-python", "matplotlib"]
+
+[tool.setuptools]
+# Flat module, not a package: robot_hal.py's own sys.path trick handles the
+# generated/ stubs (see _ensure_generated_stubs), so "robot_hal" just needs to
+# be importable by name -- no need to nest this in a package directory.
+py-modules = ["robot_hal"]

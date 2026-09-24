@@ -9,6 +9,10 @@ Makefile
 python/generated/
 python/__pycache__/
 
+# Python packaging artifacts (pip install -e python/)
+python/*.egg-info/
+python/build/
+
 # Python virtualenv
 .venv/
 

@@ -10,23 +10,60 @@ it behind one class, `SimRobotHAL`, with plain method calls and Python-native ty
 tuples, numpy arrays). This is the intended integration point for your control code — see
 "Why a HAL, not raw gRPC" below for why it's shaped this way.
 
-## Setup (once)
+## Using this from your own project (recommended)
+
+Clone this repo as a subfolder of your own robot-control project, next to your own code:
+
+```
+my_robot_project/
+├── robocup_simulator/        <- git clone https://github.com/c1paa/robocup_sumilator.git
+├── src/                      <- your own control code
+└── files/                    <- anything else of yours (data, configs, ...)
+```
+
+```bash
+cd my_robot_project
+git clone https://github.com/c1paa/robocup_sumilator.git
+
+python3 -m venv .venv && source .venv/bin/activate
+pip install -e ./robocup_simulator/python        # registers `robot_hal` as an importable module
+bash robocup_simulator/simulator/setup.sh        # one-time: builds the C++ simulator itself
+```
+
+Then, from any file under `src/` (or anywhere else in your project — no relative paths, no
+`sys.path` editing):
+
+```python
+from robot_hal import SimRobotHAL
+
+hal = SimRobotHAL()
+hal.connect()
+hal.send_velocity(0.5, 0.0, 0.0)
+```
+
+`pip install -e` is an *editable* install: it doesn't copy `robot_hal.py` anywhere, it just makes
+your venv import it straight from `robocup_simulator/python/`, so `git -C robocup_simulator pull`
+picks up updates with no re-install needed. The generated gRPC stubs
+(`robocup_simulator/python/generated/`) are also handled for you — `robot_hal.py` generates them
+itself the first time it's imported (and regenerates them if `simulator.proto` ever changes and you
+pull), so there's no separate `generate_proto.sh` step to remember either. You still need the
+simulator itself running before your code connects — build it once with `setup.sh` above, then
+`./robocup_simulator/run_simulator.sh` each time you want to run it.
+
+## Quick start (working inside this repo itself)
+
+If you're editing this repo directly rather than depending on it from elsewhere — e.g. hacking on
+`viewer.py`/`lidar_viewer.py`, or adding a new sensor to `robot_hal.py` — a plain
+`pip install -r requirements.txt` (or just running scripts from inside `python/`) works too, no
+editable install needed:
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r python/requirements.txt
-bash python/generate_proto.sh   # regenerates python/generated/ from the .proto file
 ```
 
-`python/generated/` is generated code, git-ignored — re-run `generate_proto.sh` after pulling a
-change to `simulator/proto/simulator.proto`, or if `generated/` is simply missing.
-
-## Quick start
-
 ```python
-import sys
-sys.path.insert(0, "/path/to/robocup_sumilator/python")  # or run your script from python/
-from robot_hal import SimRobotHAL
+from robot_hal import SimRobotHAL   # run from inside python/, or sys.path.insert it first
 
 hal = SimRobotHAL()   # defaults: host="localhost", port=50051, robot_id=0
 hal.connect()          # starts the background sensor/command threads
@@ -40,13 +77,9 @@ hal.kick(1.0)                       # fire the kicker at full requested power
 hal.close()
 ```
 
-That's the whole integration surface. No manual channel/stub setup, no protobuf message
-construction — `import robot_hal` (or `from robot_hal import SimRobotHAL`) is the only import your
-control code needs from this project.
-
-If your control code lives outside this repo, either add `python/` to `sys.path` as above, or copy
-`robot_hal.py` next to `generated/` (it needs both `generated/simulator_pb2*.py` and its own gRPC
-dependencies, see `requirements.txt`).
+Either way, `import robot_hal` (or `from robot_hal import SimRobotHAL`) is the only import your
+control code needs from this project — no manual channel/stub setup, no protobuf message
+construction.
 
 ## API reference
 
@@ -108,6 +141,8 @@ position X,Z"), rotate your world-frame velocity into body frame using the curre
   instead of copying this pattern.
 - `lidar_viewer.py` — live 2D lidar plot, *does* go through `robot_hal.SimRobotHAL.get_lidar_scan()`
   — the more representative example to copy from.
-- `generate_proto.sh` — regenerates `generated/` from `simulator/proto/simulator.proto`. Only
-  needed if you're changing the `.proto` file itself (adding a new sensor/command field) — normal
-  control-code usage never touches this.
+- `generate_proto.sh` — regenerates `generated/` from `simulator/proto/simulator.proto` on demand.
+  `robot_hal.py` already does this automatically on import when needed (see above), so you'll
+  rarely run this by hand — it's there mainly for explicitly forcing a regeneration.
+- `pyproject.toml` — makes `python/` installable with `pip install -e .` (see "Using this from your
+  own project" above). `robot_hal` is a flat module, not a package, so nothing else here changes.

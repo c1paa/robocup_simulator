@@ -22,6 +22,56 @@ import sys
 import queue
 import threading
 
+
+def _ensure_generated_stubs():
+    """Generate generated/simulator_pb2*.py from simulator.proto if it's
+    missing, or stale (the .proto changed since the stub was last built) --
+    so a fresh `git clone` + `pip install -e python/` needs no separate
+    `generate_proto.sh` step; import alone is enough. Only regenerates when
+    actually needed (checked by mtime), same output generate_proto.sh
+    produces, so running that script explicitly still works too.
+
+    Requires the source .proto file to exist at its normal repo-relative
+    location (../simulator/proto/simulator.proto) -- true for both a plain
+    clone and an editable pip install (`pip install -e`), since neither
+    copies this file out of the repo tree. If the .proto isn't there (e.g. a
+    non-editable install shipped without the rest of the repo) but a stub
+    already exists, the existing stub is trusted as-is instead of erroring.
+    """
+    here = os.path.dirname(os.path.abspath(__file__))
+    gen_dir = os.path.join(here, "generated")
+    stub = os.path.join(gen_dir, "simulator_pb2.py")
+    proto = os.path.abspath(os.path.join(here, "..", "simulator", "proto", "simulator.proto"))
+
+    stub_exists = os.path.exists(stub)
+    proto_exists = os.path.exists(proto)
+    if stub_exists and (not proto_exists or os.path.getmtime(stub) >= os.path.getmtime(proto)):
+        return
+    if not proto_exists:
+        if stub_exists:
+            return
+        raise RuntimeError(
+            f"No generated gRPC stubs at {stub}, and the .proto source ({proto}) "
+            "doesn't exist either. robot_hal.py needs to run from inside the "
+            "robocup_sumilator repo (a plain clone or `pip install -e`), not a "
+            "standalone copy of just this file."
+        )
+
+    os.makedirs(gen_dir, exist_ok=True)
+    from grpc_tools import protoc
+    proto_dir = os.path.dirname(proto)
+    args = [
+        "protoc",
+        f"--proto_path={proto_dir}",
+        f"--python_out={gen_dir}",
+        f"--grpc_python_out={gen_dir}",
+        proto,
+    ]
+    if protoc.main(args) != 0:
+        raise RuntimeError("Failed to generate gRPC stubs from simulator.proto")
+
+
+_ensure_generated_stubs()
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "generated"))
 
 import grpc
