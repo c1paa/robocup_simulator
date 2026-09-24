@@ -9,13 +9,16 @@ currently no-op stubs (`Robot::kick()` / `Robot::dribble()` in `simulator/src/ro
 (`/robot/kicker`, `/robot/dribbler`) — this task fills in the physics behind them, not the
 transport.
 
-**Status: implemented, reviewed, and revised twice** — the original review found the capture
+**Status: implemented, reviewed, and revised three times** — the original review found the capture
 force model was missing an active centering pull and would spontaneously eject a stationary,
 untouched ball after ~1s (see "Force model revision"). A later request added genuine pocket
 recession (the ball sits physically recessed into the chassis, not flush against it — see
 "Second revision"), which required shrinking the chassis's own collision geometry and removing
-the original "lip". Read both revision sections before touching `/robot/dribbler/friction`,
-`normal_force`, `centering_time_constant`, `forward_offset`, or `pocket_depth`.
+the original "lip". A third request replaced the single combined-direction Coulomb clamp with two
+separately-budgeted axes (roller vs. cradle plate — see "Third revision"), so the "no separate
+lateral allowance" language in the first revision below is superseded. Read all three revision
+sections before touching `/robot/dribbler/friction`, `normal_force`, `centering_time_constant`,
+`forward_offset`, or `pocket_depth`.
 
 Read [`AGENTS.md`](../../AGENTS.md) first (units convention, yaw convention, config-access
 pattern) and [`docs/tasks/ball-physics.md`](ball-physics.md) / `simulator/src/ball.cpp` for how
@@ -433,6 +436,69 @@ rendering, the lip, `pocket_depth` itself — none of them reproduced it alone) 
 stash`ed true baseline, three repeated runs each, before finding the real culprit. Left that
 `max_speed`/`radius_edge` edit as found (not this task's to revert) — but if dribbler behavior
 looks wrong again, check `robot.json` against `git diff` before assuming new code broke it.
+
+## Third revision: cradle plate (normal) vs. roller (tangential) — separate grip budgets
+
+Follow-up request: model the physical plate more literally. Real hardware holds the ball with
+two distinct contacts below the roller — a concave plate machined to the ball's own radius (~10mm
+tall, bottom edge ~4mm off the ground, so its center of curvature coincides with the ball's own
+seated center) plus the roller itself just above it. Because the plate matches the ball's
+curvature, whatever force it exerts on the ball is necessarily perpendicular to that shared
+spherical surface at the contact point — described by the user as *"при поворотах на мяч силы
+действуют перпендикулярно поверхности сферы которую она описывает, так при поворотах мяч не
+дергает и держится не только из-за дриблера"* — and the ball should eject when *"резко
+повернуться и нормальное ускорение станет больше чем сила которую дает дриблер для удержания
+мяча."*
+
+The second revision's model already computed a single **world-frame target velocity** for the
+contact point (rigid-attachment + centering + spin) and derived **one** combined-direction,
+Coulomb-clamped force from the slip against it — explicitly "no separate lateral allowance" (see
+the first revision above). That single combined direction is the problem the user is describing:
+whatever direction zeroes the slip fastest could include a large chunk of the roller's own huge
+along-roller-axis spin demand (`actualSpeed * r`, easily 1+ m/s) mixed in with the turning-hold
+demand, so the two fought each other inside one clamp — this is what produced the "ejects, then
+flies out sideways on re-capture as if spun very fast" symptom reported 2026-09-24.
+
+Fix: split the slip into two **axes**, each with its own Coulomb budget, instead of one combined
+vector with one budget:
+
+- **Roller axis** — along the ball's own local-position direction (`localX, localZ`, normalized).
+  This is where the roller's own target (`spinWorld`, always along local `X`) lands, so it's the
+  roller's job: pull the ball in and impart backspin. Budget: `friction * normal_force` (plain
+  roller-vs-ball surface friction, no pocket bonus — the pocket doesn't add extra grip in the
+  direction the roller spins).
+- **Cradle axis** — perpendicular to the roller axis (rotated 90°). This is where the
+  rigid-attachment term's rotational component lands (basic circular motion: a point rigidly
+  attached to a rotating body has velocity *tangential* to its offset from the rotation axis, i.e.
+  perpendicular to the ball's own local-position vector, not parallel to it — verified empirically,
+  see the note below) and where the centering spring's lateral correction lands. Budget:
+  `friction * (normal_force + pocket_depth * pocket_grip_gain)` — the same total the old model's
+  single clamp used, but now undiluted by the roller's own spin demand. This is the "сила, которую
+  даёт дриблер для удержания" — exceed it and the ball drifts off its seated position and
+  eventually leaves the capture zone, i.e. ejects, exactly matching the user's description.
+
+**A mistake caught by testing, not code review, worth recording**: the first attempt assigned the
+axes the other way around — "normal/cradle" = *along* the ball's own local-position vector,
+reasoning that a turn's centripetal demand points from the ball toward the robot's rotation axis
+(true for *acceleration*). But the model works in terms of a **target velocity**, and velocity
+under pure rotation is tangential to the offset, not radial — so the turning demand actually lands
+on the axis *perpendicular* to the ball's position, and the roller's own spin (along local `X`, the
+ball's position direction when centered) is what's parallel to it. The first (wrong) assignment
+measurably regressed gentle-turn holding versus the pre-existing shared-clamp model (0.176m max
+lateral drift during a scripted 1 rad/s turn vs. the old model's 0.073m on the same test); swapping
+the two axes fixed it (0.038m — better than the old model, not worse). Re-verify empirically
+(gRPC test script, not code review) if you touch this axis assignment again.
+
+Verified via a gRPC test script (throwaway, not committed) sweeping turn rate after a clean
+capture + 1.5s settle: 0.2/0.5/1.0 rad/s all held with 2-7mm max drift and re-settled near dead
+center once the turn stopped; 1.5 rad/s ejected (drift kept growing after the turn stopped instead
+of recovering) — consistent with the first revision's own "~2 rad/s, not perfectly crisp run to
+run" caveat, which still applies here (a longer sustained 1.0 rad/s turn in a separate run drifted
+further, ~38mm, before recovering — the exact boundary is a marginally-stable regime, not a hard
+threshold, same caveat as before, not a new one this revision introduced).
+
+`m_loadFraction` (motor sag feedback) now comes from the roller axis's own utilization only, not
+the combined force — the cradle/plate force is pure geometry and doesn't load the roller motor.
 
 ## Docs to update when done
 

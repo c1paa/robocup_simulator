@@ -189,35 +189,86 @@ void Dribbler::update(const Robot& robot, Ball& ball, float dt)
     btVector3 slipWorld = surfVelWorld - targetVelWorld;
     slipWorld.setY(0.0f);
 
+    // ---- Split the slip into a "roller" axis and a "cradle" axis, and grip
+    // each with its own budget, instead of clamping one combined-direction
+    // force (the previous model). The roller spins about local Z, so its own
+    // contact-point target only ever moves along local X (see spinWorld
+    // above) — that axis is *its* job: pulling the ball in/out and imparting
+    // backspin. Everything else (rigid-attachment's response to the robot
+    // rotating/translating, and the centering spring) is what the concave
+    // plate below/behind the ball is for: a cradle machined to the ball's own
+    // radius that resists the ball being pushed off its seated position in
+    // *any* horizontal direction, via a contact force perpendicular to that
+    // shared spherical surface.
+    //
+    // Concretely: for a ball sitting centered (localZ ~ 0), the roller axis
+    // is local X and the cradle axis is local Z — and a pure yaw rotation's
+    // rigid-attachment target (`omega x offset`) is perpendicular to the
+    // ball's own local-position vector (basic circular motion: velocity is
+    // tangential to the radius), i.e. it lands on the cradle axis, not the
+    // roller axis. Concretely verified empirically: assigning the *ball's
+    // own local-position direction* as the "normal/cradle" axis (the first
+    // attempt at this) put the turning demand in the wrong (smaller, no
+    // pocket-bonus) budget and made a gentle 1 rad/s turn eject the ball,
+    // a regression from the previously-tuned/documented behavior — this is
+    // why the cradle axis is the one *perpendicular* to the ball's local
+    // position, not parallel to it.
+    //
+    // Previously mixing both into one combined-direction clamp let the
+    // roller's own huge along-X spin demand (`actualSpeed * r`, easily over
+    // 1 m/s) eat into the same budget a turn needed to hold the ball, which
+    // is what produced the "ejects, then flies out sideways on re-capture as
+    // if spun very fast" symptom — see the 2026-09-24 discussion.
+    glm::vec2 ballDirLocal = glm::normalize(glm::vec2(localX, localZ));
+    glm::vec2 cradleAxisLocal(-ballDirLocal.y, ballDirLocal.x); // rotate 90°
+    btVector3 cradleAxisWorld(
+        cosYaw * cradleAxisLocal.x + sinYaw * cradleAxisLocal.y,
+        0.0f,
+        -sinYaw * cradleAxisLocal.x + cosYaw * cradleAxisLocal.y);
+
+    float slipCradleMag = slipWorld.dot(cradleAxisWorld);
+    btVector3 slipCradleWorld = cradleAxisWorld * slipCradleMag;
+    btVector3 slipRollerWorld = slipWorld - slipCradleWorld;
+
     // Deadbeat-toward-target force, damped by m_responseGain (same role as
     // Robot::applyDriveForces's m_frictionResponseGain — the raw one-step
     // force is almost always far above the friction limit, so without this
     // it saturates the clamp every frame regardless of how small the actual
-    // slip is), then clamped to the Coulomb limit: this single clamp is the
-    // "прижимная сила" (pressing/grip force) budget shared by centering,
-    // co-rotating through a turn, and spin — there is no separate lateral
-    // allowance, so a strong enough combination of any of those (fast turn,
-    // hard reverse, big centering error) can exceed it and eject the ball,
-    // which keeps whatever spin it had at that instant (nothing here zeroes
-    // the ball's velocity/angular velocity on zone-exit, only the force
-    // stops being applied).
-    // The pocket the ball sits in isn't a full circle (see docs) — its
-    // concave walls geometrically resist lateral escape a little on top of
-    // whatever force the roller itself provides, modeled as a small bonus to
-    // the effective normal force (not a separate allowance outside the
-    // shared clamp — see the "one Coulomb clamp" note in
-    // docs/tasks/dribbler-kicker.md, still true here).
-    float effectiveNormalForce = m_normalForce + m_pocketDepth * m_pocketGripGain;
-
+    // slip is).
     float ballMass = ball.mass();
-    btVector3 forceWorld = -m_responseGain * (ballMass / dt) * slipWorld;
-    float mag = forceWorld.length();
-    float maxMag = m_friction * effectiveNormalForce;
-    float appliedMag = mag;
-    if (mag > maxMag && mag > 1e-6f) {
-        forceWorld *= maxMag / mag;
-        appliedMag = maxMag;
+    btVector3 forceCradleWorld = -m_responseGain * (ballMass / dt) * slipCradleWorld;
+    btVector3 forceRollerWorld = -m_responseGain * (ballMass / dt) * slipRollerWorld;
+
+    // Cradle budget: the plate's geometric grip, including the pocket-wall
+    // bonus (a deeper pocket resists being pushed out of it more — same
+    // reasoning as before, but now it only bonuses the cradle direction,
+    // since that's the direction the concave walls actually resist). This is
+    // the "сила, которую даёт дриблер для удержания" — exceed it (too sharp
+    // a turn) and the cradle slip can't be fully cancelled, so the ball
+    // drifts off its seated position and eventually leaves the capture zone,
+    // i.e. ejects — exactly when the required normal (centripetal)
+    // acceleration exceeds what this budget can supply.
+    float maxCradleForce = m_friction * (m_normalForce + m_pocketDepth * m_pocketGripGain);
+    // Roller budget: plain roller-vs-ball surface friction, no pocket bonus —
+    // the concave plate's walls don't add grip in the direction the roller
+    // spins, only in the direction they cradle.
+    float maxRollerForce = m_friction * m_normalForce;
+
+    float cradleMag = forceCradleWorld.length();
+    if (cradleMag > maxCradleForce && cradleMag > 1e-6f) {
+        forceCradleWorld *= maxCradleForce / cradleMag;
     }
+
+    float rollerMag = forceRollerWorld.length();
+    float rollerUtil = 0.0f;
+    if (rollerMag > maxRollerForce && rollerMag > 1e-6f) {
+        forceRollerWorld *= maxRollerForce / rollerMag;
+        rollerUtil = 1.0f;
+    } else if (maxRollerForce > 1e-6f) {
+        rollerUtil = rollerMag / maxRollerForce;
+    }
+
+    btVector3 forceWorld = forceCradleWorld + forceRollerWorld;
 
     // Wake the ball so the force actually integrates (a settled, sleeping ball
     // ignores applied forces — same reason the kicker activates before its
@@ -225,7 +276,8 @@ void Dribbler::update(const Robot& robot, Ball& ball, float dt)
     ball.body()->activate(true);
     ball.body()->applyForce(forceWorld, contactOffsetBt);
 
-    // Load fraction = applied force relative to the Coulomb limit; feeds the
-    // motor sag on the next frame.
-    m_loadFraction = (maxMag > 1e-6f) ? std::min(1.0f, appliedMag / maxMag) : 0.0f;
+    // Load fraction feeds next frame's motor sag — specifically the roller's
+    // own utilization, since that's the roller motor's load; the cradle
+    // force is pure plate geometry and doesn't touch the motor at all.
+    m_loadFraction = std::min(1.0f, rollerUtil);
 }
