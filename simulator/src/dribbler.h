@@ -41,8 +41,16 @@ private:
     float m_heightOffset  = 0.015f;     // m, roller axis height above ground
     float m_captureToleranceForward = 0.015f; // m, +/- forward slack around forward_offset
     float m_captureToleranceHeight  = 0.010f; // m, +/- height slack around height_offset
-    float m_friction = 1.5f;           // Coulomb coefficient (roller vs ball)
-    float m_normalForce = 1.0f;        // N, effective press force between roller and ball
+    float m_friction = 1.5f;           // Coulomb coefficient (roller vs ball), shared by both budgets below
+    float m_normalForce = 1.0f;        // N, cradle plate's press force against the ball (turning/centering budget)
+    float m_rollerNormalForce = 0.0667f; // N, roller's own (much lighter) press force against the ball
+                                        // (straight-line accel/decel budget) — see the roller-vs-cradle
+                                        // split note in Dribbler::update and the 2026-09-24 discussion:
+                                        // real dribblers hold far better against lateral/turning loads
+                                        // (the cradle plate's geometric grip) than against pure forward/
+                                        // backward slip (bare roller-vs-ball rolling friction), so this
+                                        // is deliberately its own, much smaller, number rather than
+                                        // reusing m_normalForce.
     float m_pocketDepth = 0.015f;      // m, how far the ball sits inside the chassis's nominal
                                         // circle when captured (see forward_offset's derivation
                                         // comment in Dribbler::init)

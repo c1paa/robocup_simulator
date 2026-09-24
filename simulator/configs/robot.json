@@ -68,6 +68,7 @@
             "pocket_grip_gain": 10.0,
             "friction": 1.5,
             "normal_force": 1.0,
+            "roller_normal_force": 0.0667,
             "motor_time_constant": 0.03,
             "load_sag_gain": 0.4,
             "response_gain": 0.4,

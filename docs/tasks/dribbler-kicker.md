@@ -9,7 +9,7 @@ currently no-op stubs (`Robot::kick()` / `Robot::dribble()` in `simulator/src/ro
 (`/robot/kicker`, `/robot/dribbler`) — this task fills in the physics behind them, not the
 transport.
 
-**Status: implemented, reviewed, and revised four times** — the original review found the capture
+**Status: implemented, reviewed, and revised six times** — the original review found the capture
 force model was missing an active centering pull and would spontaneously eject a stationary,
 untouched ball after ~1s (see "Force model revision"). A later request added genuine pocket
 recession (the ball sits physically recessed into the chassis, not flush against it — see
@@ -19,8 +19,14 @@ separately-budgeted axes (roller vs. cradle plate — see "Third revision"), so 
 lateral allowance" language in the first revision below is superseded. A fourth request replaced
 the second revision's uniformly-shrunk chassis with a full-radius chassis plus a localized notch
 (see "Fourth revision"), so the "harmless today" language in the second revision below is also
-superseded. Read all four revision sections before touching `/robot/dribbler/friction`,
-`normal_force`, `centering_time_constant`, `forward_offset`, or `pocket_depth`.
+superseded. A fifth request fixed a real bug where the cradle force was applied at the same
+off-center point as the roller force, manufacturing spurious torque (including unwanted yaw/spin)
+on ordinary turns and straight-line corrections — see "Fifth revision". A sixth request asked for
+straight-line (forward/backward) grip to be much weaker than turning grip, matching a ~0.3 m/s
+real-hardware reverse-retention limit — see "Sixth revision" for what was actually achieved and
+why an exact 0.3 m/s threshold isn't currently reachable through this parameter alone. Read all
+six revision sections before touching `/robot/dribbler/friction`, `normal_force`,
+`roller_normal_force`, `centering_time_constant`, `forward_offset`, or `pocket_depth`.
 
 Read [`AGENTS.md`](../../AGENTS.md) first (units convention, yaw convention, config-access
 pattern) and [`docs/tasks/ball-physics.md`](ball-physics.md) / `simulator/src/ball.cpp` for how
@@ -559,6 +565,105 @@ Verified via gRPC test scripts:
   again for gameplay tuning, this is the number to re-tune (`friction`/`normal_force`/
   `pocket_grip_gain` in the third revision, or the notch's own angular width), not something to
   "fix" back down as if it were a bug.
+
+## Fifth revision: cradle force must be central (radial), not applied at the roller's contact point
+
+Bug report (2026-09-24): kicks occasionally went off to the side instead of straight ahead, and
+ball bounces off the walls didn't always mirror the incoming angle — user asked whether this was
+real spin physics (plausible — a real ball with spin curves off a frictional wall) or a bug.
+
+Root cause found in `Dribbler::update`: the third revision split the holding force into a roller
+budget (tangential, spin) and a cradle budget (normal, turning/centering), but both were still
+summed into one `forceWorld` and applied at the *same* single point, `contactOffsetBt` — a vector
+radial from the ball's own center toward the roller axis. Applying the **roller** force there is
+correct and intentional (that's what makes Bullet derive real backspin torque with no separate
+torque term, per the comment above `contactOffsetLocal`). Applying the **cradle** force there is
+not: a plate machined to the ball's own curvature contacts it all around, and a matching-curvature
+(normal) contact force is by construction radial through the ball's center — the same
+"perpendicular to the sphere" reasoning that motivated splitting cradle from roller in the third
+revision in the first place implies zero net torque from the cradle force. Since
+`contactOffsetBt` is generally *not* parallel to `forceCradleWorld` (it always carries a
+`height_offset` component the cradle force doesn't), applying the cradle force there manufactured
+a spurious torque every frame a turn or centering correction fired — including a yaw (world-Y)
+component with no physical basis, which is what put a curve on an otherwise straight approach: the
+ball picks up real sidespin during ordinary dribbling that a real roller/cradle assembly wouldn't
+impart, and ground/wall friction then couples that spin into lateral drift once the ball is free.
+
+Fix: apply the two budgets through different Bullet calls — `applyForce(forceRollerWorld,
+contactOffsetBt)` (unchanged, still produces intentional backspin) and `applyCentralForce
+(forceCradleWorld)` (bypasses `rel_pos` entirely, so it cannot contribute torque regardless of
+where `contactOffsetBt` points).
+
+Verified via gRPC test scripts: captured the ball, drove straight for 1.5s while dribbling, then
+kicked — the resulting travel direction was within noise (<0.2°) of the robot's commanded forward
+direction, with zero measurable lateral drift. A harsher scenario (turn left, turn right, settle,
+then kick) also came out within ~0.2° of straight, and the wall bounce that followed (the tiny
+test field puts a wall within ~1m of any kick) mirrored the incoming angle within ~1°, consistent
+with the small amount of deviation real wall friction (`/physics/field/wall_friction`) should add
+to a near-spinless impact, not a spurious multi-degree curve. A/B'd against the pre-fix code via
+`git stash`: same maneuver measured up to ~0.6° of kick-direction deviation beforehand — smaller
+than initially guessed (the specific turn maneuver used partially cancels the spurious yaw torque
+by symmetry), but the mechanism is real and unbounded in general (an asymmetric turn/centering
+history won't cancel), and the fix is a straightforward physical correctness fix regardless of how
+large any one test's deviation happens to measure.
+
+Residual, expected behavior: wall bounces still won't be *exactly* mirror-image when the ball
+carries real spin (e.g. backspin off the roller, or spin imparted by a previous wall/robot hit) —
+that's real physics (a spinning ball hitting a frictional surface does deflect off the pure
+specular angle), not a bug, and is a separate question from the spurious-yaw bug fixed here.
+
+## Sixth revision: a separate, much weaker grip budget for straight-line (roller-axis) driving
+
+Follow-up request: the ball holds too well while driving. The user can drive the robot around at
+full commanded speed (including a hard reverse) and the ball never comes loose, but on the real
+robot it reportedly ejects somewhere around 0.3 m/s of reverse speed — asked for the dribbler's
+friction to be recalibrated so a similar threshold shows up here.
+
+Investigation confirmed the report was accurate and worse than it sounds: before this revision, a
+full-speed (1.885 m/s) reverse command produced **zero measurable drift**, not just "under
+tolerance" — the third revision's `maxRollerForce = friction * normal_force` (1.5 N) was, with
+this model's deadbeat controller and `response_gain`, comfortably enough to track *any* reachable
+commanded speed with no slip at all, since `Robot::applyDriveForces`'s own first-order motor lag
+only ever presents the dribbler with small, smooth per-step velocity changes. So straight-line
+driving could never eject the ball, only sharp turns could (per the fourth revision) — the roller
+budget was, in effect, unconstrained for its own stated job.
+
+Fix: gave the roller budget its own config key, `/robot/dribbler/roller_normal_force` (default
+0.0667 N — about 1/15th of the cradle plate's `normal_force`), used only in
+`maxRollerForce = friction * roller_normal_force`; `maxCradleForce` (turning/centering) is
+untouched. This reflects a real mechanical difference: a concave cradle plate's geometric grip
+(reinforced further by the fourth revision's real notch-wall collision) is legitimately much
+stronger than a bare roller's rolling friction against the ball, so decoupling them (rather than
+turning down the shared `friction`/`normal_force`, which would have also weakened turn-holding)
+was the right lever.
+
+**This does not land the threshold at 0.3 m/s, and that's worth being explicit about rather than
+picking a number that merely looks close.** Sweeping commanded reverse speeds (0.2 to 1.885 m/s,
+each trial re-approaching from a recentered start — the field is only 2.43m in the isolated test
+config, small enough that an earlier version of this sweep falsely showed *no* ejection at any
+speed because the robot had drifted against a boundary wall and physically couldn't accelerate)
+found the ejection threshold sits around **1.2-1.4 m/s**, and is largely insensitive to
+`roller_normal_force` over a 30x range (0.0667 down to 0.002 all gave a similar threshold) — well
+below the naive theoretical estimate (~0.1 N, derived from `mass * (0.3 / motor_time_constant)`)
+that motivated the initial 0.0667 default. The reason: below ~1.2 m/s, `Robot::applyDriveForces`'s
+*own* per-wheel friction budget can smoothly track the commanded velocity ramp every physics step
+(the robot's own wheel-friction deadbeat controller isn't saturated), so the dribbler is only ever
+asked to track a small, gentle, easily-correctable slip regardless of how small
+`roller_normal_force` is set — there's no meaningful disturbance for the dribbler budget to fail
+against. Only once the *commanded* step is large enough that the robot's own wheels can't keep up
+with the (already-smoothed) target does a real, abrupt velocity perturbation reach the ball, and
+that's where `roller_normal_force` starts to matter and ejection becomes possible. In short: the
+robot's own drivetrain dynamics, not the dribbler's grip parameter, is the dominant nonlinearity in
+this scenario.
+
+Reaching a literal ~0.3 m/s threshold would need one of: (a) `roller_normal_force` reduced so far
+it can no longer hold the ball through *any* normal smooth acceleration (breaks ordinary
+dribbling well before 0.3 m/s becomes special), or (b) also reducing the robot's own reverse
+traction (`/robot/physics/wheel_friction_driven` or `/robot/motor/peak_torque`), which isn't
+dribbler-specific and would blunt forward driving and turning too. Left `roller_normal_force` at
+the theoretical 0.0667 N default rather than chasing (a), since going lower demonstrably didn't
+move the threshold in testing. If a precise 0.3 m/s figure genuinely matters for gameplay, (b) is
+the parameter to revisit next, with the user's explicit sign-off given its broader blast radius.
 
 ## Docs to update when done
 

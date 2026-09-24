@@ -37,6 +37,7 @@ void Dribbler::init(Config& cfg)
     // normal = mass * gravity / wheelCount). No further conversion.
     m_friction = cfg.getFloat("/robot/dribbler/friction", 1.5f);
     m_normalForce = cfg.getFloat("/robot/dribbler/normal_force", 1.0f);
+    m_rollerNormalForce = cfg.getFloat("/robot/dribbler/roller_normal_force", 0.0667f);
 
     m_motorTimeConstant = cfg.getFloat("/robot/dribbler/motor_time_constant", 0.03f);
     m_loadSagGain = cfg.getFloat("/robot/dribbler/load_sag_gain", 0.4f);
@@ -251,8 +252,17 @@ void Dribbler::update(const Robot& robot, Ball& ball, float dt)
     float maxCradleForce = m_friction * (m_normalForce + m_pocketDepth * m_pocketGripGain);
     // Roller budget: plain roller-vs-ball surface friction, no pocket bonus —
     // the concave plate's walls don't add grip in the direction the roller
-    // spins, only in the direction they cradle.
-    float maxRollerForce = m_friction * m_normalForce;
+    // spins, only in the direction they cradle. Uses its own, much lighter
+    // m_rollerNormalForce (not m_normalForce) — see the member comment in
+    // dribbler.h. Calibrated (2026-09-24) so a sudden full-reverse command
+    // (robot decelerating/reversing through its own motor_time_constant ramp)
+    // starts ejecting the ball around ~0.3 m/s of commanded reverse speed,
+    // matching the real hardware's reported behavior — previously this used
+    // m_normalForce (1.0 N) and was strong enough to track the robot's own
+    // motor ramp at *any* commanded speed up to max (1.885 m/s) with zero
+    // measured drift, i.e. straight-line driving could never eject the ball
+    // at all, only sharp turns could (see docs/tasks/dribbler-kicker.md).
+    float maxRollerForce = m_friction * m_rollerNormalForce;
 
     float cradleMag = forceCradleWorld.length();
     if (cradleMag > maxCradleForce && cradleMag > 1e-6f) {
@@ -268,13 +278,33 @@ void Dribbler::update(const Robot& robot, Ball& ball, float dt)
         rollerUtil = rollerMag / maxRollerForce;
     }
 
-    btVector3 forceWorld = forceCradleWorld + forceRollerWorld;
-
-    // Wake the ball so the force actually integrates (a settled, sleeping ball
-    // ignores applied forces — same reason the kicker activates before its
-    // impulse).
+    // Apply the two budgets through DIFFERENT points on purpose, not summed
+    // into one applyForce(forceWorld, contactOffsetBt) call (the previous
+    // version). contactOffsetBt is itself a radial vector from the ball's own
+    // center (center + ballRadius * direction-to-roller-point) — for the
+    // roller force that's correct and intentional: it's offset along the
+    // roller's own axis, so Bullet derives real backspin torque from it, no
+    // separate torque term needed (see the comment above contactOffsetLocal).
+    // But applying the CRADLE force at that same point is wrong: a plate
+    // machined to the ball's own curvature contacts it all around, and a
+    // matching-curvature (normal) contact force is by construction radial
+    // through the ball's center — zero net torque, by the same "perpendicular
+    // to the sphere" reasoning that motivated splitting cradle from roller in
+    // the first place. Applying it at contactOffsetBt instead (which is NOT
+    // generally parallel to forceCradleWorld — e.g. contactOffsetBt always has
+    // a height_offset component, forceCradleWorld doesn't) manufactures a
+    // spurious torque every frame a turn/centering correction fires,
+    // including a yaw (world-Y) component with no physical basis — this is
+    // what was producing the "kicks and wall bounces drift off to the side
+    // even on a straight, centered approach" symptom (2026-09-24 discussion):
+    // the ball picks up real sidespin during ordinary dribbling that a real
+    // roller/cradle assembly would never impart, and that spin then couples
+    // into lateral drift via ground/wall friction once the ball is free.
+    // applyCentralForce bypasses rel_pos entirely, so it cannot contribute any
+    // torque regardless of contactOffsetBt.
     ball.body()->activate(true);
-    ball.body()->applyForce(forceWorld, contactOffsetBt);
+    ball.body()->applyForce(forceRollerWorld, contactOffsetBt);
+    ball.body()->applyCentralForce(forceCradleWorld);
 
     // Load fraction feeds next frame's motor sag — specifically the roller's
     // own utilization, since that's the roller motor's load; the cradle
