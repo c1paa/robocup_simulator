@@ -27,6 +27,7 @@ App::~App()
 bool App::init(const std::string& configDir)
 {
     Config& cfg = Config::instance();
+    cfg.setConfigDir(configDir);
 
     try {
         cfg.loadProject(configDir + "project.json");

@@ -65,9 +65,12 @@ Class responsibilities (see their headers for the exact interface):
   velocity change is independent of the offset point (see the comment above
   `Kicker::requestKick`). Owned by `App`, same pattern as `Dribbler`. See
   [`docs/tasks/dribbler-kicker.md`](docs/tasks/dribbler-kicker.md).
-- `MirrorProfile` — mirror shape (`cone`/`hyperbola`) as a profile function `r = f(h)`; the
-  single source of truth for mirror geometry, used both for the drawn mesh (`Robot`) and the
-  optics (`Camera`). See [`docs/tasks/mirror-camera-vision.md`](docs/tasks/mirror-camera-vision.md).
+- `MirrorProfile` — mirror shape (`cone`/`hyperbola`/`profile`) as a profile function
+  `r = f(h)`; the single source of truth for mirror geometry, used both for the drawn mesh
+  (`Robot`) and the optics (`Camera`). `type: "profile"` loads a real (or externally-measured)
+  mirror from a CSV table (`theta_deg,r_mm,z_mm`, relative to the camera's own focal point)
+  instead of a closed-form curve — see [`docs/tasks/mirror-camera-vision.md`](docs/tasks/mirror-camera-vision.md)
+  for the coordinate convention and `simulator/configs/mirrors/` for example files.
 - `Camera` — the robot's own (mirror) camera: cubemap capture + baked direction LUT →
   real mirror-distorted image, plus the in-window preview overlay. Separate from the viewer
   camera in `App`.

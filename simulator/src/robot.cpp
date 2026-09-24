@@ -30,11 +30,12 @@ void Robot::init(Config& cfg, btDiscreteDynamicsWorld* world)
     float angleOffsetDeg  = cfg.getFloat("/robot/wheels/angle_offset", 90.0f);
     m_theta0 = angleOffsetDeg * DEG2RAD;
 
-    // Mirror (single source of truth for mirror geometry)
-    m_mirror.loadFromConfig(cfg);
-
-    // Camera
+    // Camera (read before the mirror: Type::Profile positions itself from
+    // this, see MirrorProfile::loadFromConfig)
     m_cameraHeight = cfg.getFloat("/robot/camera/height", 110.0f) / MM;
+
+    // Mirror (single source of truth for mirror geometry)
+    m_mirror.loadFromConfig(cfg, "/robot/mirror", m_cameraHeight);
 
     // Motor: three MF4015v2 direct-drive BLDC "gimbal" motors, one per wheel
     // (no gearbox — consistent with this robot's tiny 48mm wheels). Per

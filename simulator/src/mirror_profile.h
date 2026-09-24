@@ -2,6 +2,7 @@
 
 #include "common.h"
 #include <string>
+#include <vector>
 
 class Config;
 
@@ -16,9 +17,19 @@ class Config;
 class MirrorProfile
 {
 public:
-    enum class Type { Cone, Hyperbola };
+    // Profile: a numerically-defined mirror (e.g. one whose radius solves an
+    // ODE for the single-viewpoint property, like a real hardware mirror
+    // measured/calibrated externally) loaded from a CSV table instead of a
+    // closed-form curve. See mirror_profile.cpp for the coordinate mapping.
+    enum class Type { Cone, Hyperbola, Profile };
 
-    void loadFromConfig(Config& cfg, const std::string& base = "/robot/mirror");
+    // cameraHeight (metres, robot-local Y of the physical camera) is only
+    // needed for Type::Profile: the CSV's own origin O is defined as the
+    // camera's focal point, so the table's z values are positioned in
+    // robot-local space as cameraHeight + z. Ignored for Cone/Hyperbola,
+    // which position themselves from base_height directly.
+    void loadFromConfig(Config& cfg, const std::string& base = "/robot/mirror",
+                         float cameraHeight = 0.0f);
 
     Type type() const { return m_type; }
 
@@ -60,4 +71,12 @@ private:
     // Derived hyperbola values (recomputed on load).
     float m_c     = 0.0f; // sqrt(a^2 + b^2), focus offset from mirror center
     float m_zBase = 0.0f; // z (from center) of the base edge
+
+    // Type::Profile: CSV table (theta_deg, r_mm, z_mm relative to the camera
+    // focus O), converted to metres and sorted ascending by z at load time.
+    // m_csvR[i] is the mirror radius at height m_csvZ[i] above O. base_height
+    // and base_radius above are derived from this table (base = the z_max
+    // end, i.e. the mirror rim) rather than configured independently.
+    std::vector<float> m_csvZ;
+    std::vector<float> m_csvR;
 };

@@ -264,3 +264,53 @@ mirror-distorted camera feed, updating as the robot moves in the simulator's own
 Config units stay millimetres in JSON, converted to metres once at load time, per
 `AGENTS.md` — the `MirrorProfile` loader is no exception (`hyperbola_a`/`hyperbola_b` etc. are
 mm in the JSON, convert on load like everything else in `robot.cpp`/`camera.cpp` already does).
+
+## Addendum: `type: "profile"` — mirrors loaded from a CSV table
+
+Decision #2 above ("architected for more later") is exercised here: a third `MirrorProfile::Type`
+that reads a real (or externally-measured/ODE-solved) mirror shape from a CSV instead of a
+closed-form curve, for mirrors that don't have one (e.g. a profile numerically solved for the
+single-viewpoint property under a specific pinhole camera, rather than a true hyperboloid).
+
+**CSV format** (`theta_deg,r_mm,z_mm`, optional header row, one row per ring):
+- Coordinate system: origin O = the camera's own focal point (entrance pupil), z up along the
+  optical axis. This is *not* robot-local space and *not* relative to the mirror's own vertex or
+  the floor — it's anchored to the camera.
+- `theta_deg` is the angle from vertical of the ray "mirror point → focus"; rows should be
+  monotonic in `theta`/`z` (a surface of revolution profile function `r = f(h)` must be
+  single-valued — see decision #2's `intersectRay` note). The loader tolerates either
+  vertex-first or edge-first row order (sorts ascending by `z`) but not a non-monotonic table.
+- All values in millimetres, converted to metres on load like everything else.
+
+**Coordinate mapping into robot-local space:** `/robot/camera/height` (already the physical
+camera's robot-local Y) *is* O for this type — the config requirement "camera stands exactly at
+the point the profile was measured from" falls out for free, rather than needing a separate
+focus-alignment step. `MirrorProfile::loadFromConfig` therefore takes `cameraHeight` as a new
+parameter (only consumed by `Type::Profile`) and derives `baseHeight`/`baseRadius`/
+`mirrorHeight()` straight from the table's z-extremes + `cameraHeight`, instead of from the
+`base_height`/`base_diameter` config keys (which stay present in `robot.json` but are unused for
+this type — they're read unconditionally for `cone`/`hyperbola` compatibility, see
+`MirrorProfile::loadFromConfig`).
+
+**What's generic vs. new:** `intersectRay`, `normalAt`, and `effectiveViewpointLocal` all needed
+*zero* changes — `intersectRay` already bisects on `radiusAt(height)` generically (that was the
+whole point of decision #2's abstraction), and `effectiveViewpointLocal` already falls back to
+`(0, cameraHeight, 0)` for any non-hyperbola type, which is exactly O by construction here. Only
+`radiusAt` (table lookup + linear interpolation between the two bracketing rows) and `slopeAt`
+(central finite difference on `radiusAt` itself, since there's no closed-form derivative — this
+is exactly the case decision #2 flagged as "a future profile type could" need finite differences)
+needed real implementation.
+
+**Config keys** (`/robot/mirror`): `"type": "profile"` and `"profile_csv": "<path>"`, resolved
+relative to the config directory the same way `project.json`/`robot.json` themselves were found
+(`Config::configDir()`, set once in `App::init` from `--config-dir`) — never an absolute path, per
+`AGENTS.md`. `simulator/configs/mirrors/example_hyperbola.csv` is a worked example (a true
+hyperboloid with a=35mm, b=40mm, 85mm rim radius — same numbers as the default `hyperbola_a`/
+`hyperbola_b`/`base_diameter` — but expressed in the O-relative CSV format and re-derived
+independently as a sanity check, not copy-pasted from the existing hyperbola math) demonstrating
+the format; it isn't wired up as the default `type` (`robot.json` still defaults to `"cone"`) so
+existing behavior is unchanged unless a config explicitly opts in.
+
+**On CSV parse failure** (missing file, unreadable, fewer than 2 valid rows): logs a warning and
+falls back to `Type::Cone` with its usual defaults, rather than crashing — consistent with the
+"every config value needs a sane default" convention in `AGENTS.md`.

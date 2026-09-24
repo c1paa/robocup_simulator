@@ -20,7 +20,8 @@
             "base_diameter": 170,
             "cone_height": 40,
             "hyperbola_a": 35,
-            "hyperbola_b": 40
+            "hyperbola_b": 40,
+            "profile_csv": "mirrors/example_hyperbola.csv"
         },
         "camera": {
             "height": 90
