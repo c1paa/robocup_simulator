@@ -234,10 +234,12 @@ void Physics::debugDrawShape(btCollisionShape* shape, const glm::mat4& model, Re
 
     switch (shape->getShapeType()) {
     case COMPOUND_SHAPE_PROXYTYPE: {
-        // The robot chassis is a btCompoundShape (cylinder + front lip box).
-        // btCompoundShape does not own its children; recurse into each child's
-        // own per-type draw code with its local transform composed under the
-        // body's world transform.
+        // The robot chassis is a btCompoundShape (a fan of angular wedge
+        // boxes approximating the chassis cylinder, full radius except at
+        // the dribbler's notch — see Robot::init). btCompoundShape does not
+        // own its children; recurse into each child's own per-type draw code
+        // (BOX_SHAPE_PROXYTYPE below handles each wedge) with its local
+        // transform composed under the body's world transform.
         btCompoundShape* compound = static_cast<btCompoundShape*>(shape);
         for (int i = 0; i < compound->getNumChildShapes(); i++) {
             btTransform childTrans = compound->getChildTransform(i);

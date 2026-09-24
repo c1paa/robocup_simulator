@@ -9,16 +9,18 @@ currently no-op stubs (`Robot::kick()` / `Robot::dribble()` in `simulator/src/ro
 (`/robot/kicker`, `/robot/dribbler`) — this task fills in the physics behind them, not the
 transport.
 
-**Status: implemented, reviewed, and revised three times** — the original review found the capture
+**Status: implemented, reviewed, and revised four times** — the original review found the capture
 force model was missing an active centering pull and would spontaneously eject a stationary,
 untouched ball after ~1s (see "Force model revision"). A later request added genuine pocket
 recession (the ball sits physically recessed into the chassis, not flush against it — see
 "Second revision"), which required shrinking the chassis's own collision geometry and removing
 the original "lip". A third request replaced the single combined-direction Coulomb clamp with two
 separately-budgeted axes (roller vs. cradle plate — see "Third revision"), so the "no separate
-lateral allowance" language in the first revision below is superseded. Read all three revision
-sections before touching `/robot/dribbler/friction`, `normal_force`, `centering_time_constant`,
-`forward_offset`, or `pocket_depth`.
+lateral allowance" language in the first revision below is superseded. A fourth request replaced
+the second revision's uniformly-shrunk chassis with a full-radius chassis plus a localized notch
+(see "Fourth revision"), so the "harmless today" language in the second revision below is also
+superseded. Read all four revision sections before touching `/robot/dribbler/friction`,
+`normal_force`, `centering_time_constant`, `forward_offset`, or `pocket_depth`.
 
 Read [`AGENTS.md`](../../AGENTS.md) first (units convention, yaw convention, config-access
 pattern) and [`docs/tasks/ball-physics.md`](ball-physics.md) / `simulator/src/ball.cpp` for how
@@ -420,10 +422,13 @@ notch without a union of many convex pieces approximating it, which felt like a 
 for a "small advantage" — see the simplification note in `Robot::init`'s comment). It still shares
 the one Coulomb clamp everything else does, per the first revision above.
 
-Known simplification, stated honestly rather than fixed silently: shrinking the whole chassis
+~~Known simplification, stated honestly rather than fixed silently: shrinking the whole chassis
 cylinder (rather than just a frontal notch/arc) means a ball — or, once multi-robot support
 exists, another robot — can in principle approach `pocket_depth` closer to the chassis from *any*
-side, not just the front. Harmless today (single robot, no robot-vs-robot collision yet).
+side, not just the front. Harmless today (single robot, no robot-vs-robot collision yet).~~
+**Fixed — see the "Fourth revision" section below.** This stopped being harmless once it produced
+a real, visible bug: the ball sinking into the chassis's own rendered mesh when approaching from
+the side/back.
 
 **A debugging note for whoever touches this next**: while chasing what first looked like a
 turn-ejection regression from this change, an already-present *uncommitted* local edit to
@@ -499,6 +504,61 @@ threshold, same caveat as before, not a new one this revision introduced).
 
 `m_loadFraction` (motor sag feedback) now comes from the roller axis's own utilization only, not
 the combined force — the cradle/plate force is pure geometry and doesn't load the roller motor.
+
+## Fourth revision: localized notch instead of a uniformly-shrunk chassis
+
+Follow-up request/bug report: the second revision's chassis collision fix shrank the *whole*
+chassis cylinder by `pocket_depth`, not just a frontal notch — flagged at the time as a known
+simplification ("harmless today, single robot"). It stopped being harmless: the ball visibly sank
+up to `pocket_depth` (15mm) into the robot's own rendered mesh whenever it approached from any
+side other than the front, since the chassis is *rendered* at the full configured radius but only
+*collided* at the shrunk one everywhere. Request: keep the hitbox at the full configured radius
+(`/robot/diameter`), with a real, localized recess only where the dribbler actually is, shaped
+(as closely as Bullet allows) like the sphere-cap plate the third revision's force model already
+assumes.
+
+Bullet constraint that shapes this fix: a dynamic `btRigidBody`'s collision shape must be convex,
+or a compound of convex pieces — it can't be a single concave shape (no boolean subtraction). A
+true spherical dimple carved into a cylinder is concave by definition, so it can't be one convex
+piece. Fix: approximate the chassis boundary as a fan of `kChassisWedgeCount` (24, 15° each)
+angular wedge boxes (`Robot::init`, replacing the single `btCylinderShape`) — full radius for
+every wedge, except the few whose angular range overlaps the dribbler's width (computed from
+`/robot/dribbler/length`, so it stays in sync with the roller's own footprint, not a separately
+tuned constant), which use `collisionRadius` (`radius - pocket_depth`) instead. The union of all
+wedges is a 24-gon approximating the full cylinder (sagitta ≈0.9mm at a 90mm radius — well under
+the ball's own radius, not visually or physically significant) with a real, localized gap only at
+the dribbler.
+
+This notch is a flat recess, not a curved one — approximating the true spherical-cap shape with
+curved collision geometry would need many more, finely-angled convex pieces for a surface the
+collision response barely needs to get right, since `Dribbler`'s hand-rolled force model (third
+revision) is what actually supplies the physically-correct, perpendicular-to-the-ball's-own-
+curvature holding force during real capture; this geometry's job is narrower — give an *unpowered*
+ball (decision #4) real structure to rest on, and stop the ball from clipping into the mesh
+everywhere else. Judged not worth the extra pieces for a shape the physics doesn't depend on.
+
+Verified via gRPC test scripts:
+
+- **Flank/back collision, the bug being fixed**: turned the robot 90° so a ball starting in front
+  of the dribbler ends up beside the (now-rotated) chassis, then drove the chassis side into it.
+  Settled at 111.5mm from the chassis center — exactly `radius (90mm) + ball_radius (21.5mm)`, the
+  full configured size. (The old uniform-shrink behavior would have stopped it at ~96.5mm instead.)
+- **Capture and unpowered rest, no regression**: capture still settles at `forward_offset` exactly
+  as before; with `dribble_speed = 0`, the ball stays resting at the captured position (within
+  ~0.2mm) for 3s+, confirming decision #4 (real collision support for an unpowered ball) still
+  holds with the new notch geometry.
+- **Turn-holding got measurably stronger — a real, understood side effect, not a bug**: the
+  notch's own wedge walls are now *real* Bullet collision geometry flanking the pocket, so they
+  mechanically resist the ball sliding out sideways during a turn *in addition to* the hand-rolled
+  cradle force from the third revision — matching the user's own description that the ball should
+  be held "не только из-за дриблера" (not only because of the dribbler). Measured effect: turns up
+  to 8 rad/s now hold (previously ~1.5-2 rad/s reliably ejected the ball, see the first/third
+  revisions); ejection still happens, just at a much higher rate (12 rad/s ejected cleanly in
+  testing) — so decision #5 (ejection must still emerge from the real geometry/force, not be
+  scripted) still holds, the threshold has just moved. If a specific ejection turn-rate is needed
+  again for gameplay tuning, this is the number to re-tune (`friction`/`normal_force`/
+  `pocket_grip_gain` in the third revision, or the notch's own angular width), not something to
+  "fix" back down as if it were a bug.
 
 ## Docs to update when done
 

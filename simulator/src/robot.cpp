@@ -92,46 +92,95 @@ void Robot::init(Config& cfg, btDiscreteDynamicsWorld* world)
     M[2] = glm::vec3(-m_wheelR, -m_wheelR, -m_wheelR);
     m_invKinematics = glm::inverse(M);
 
-    // ---- Bullet rigid body (compound: chassis cylinder, currently the only
-    // child) ----
+    // ---- Bullet rigid body (compound: a fan of angular wedge boxes
+    // approximating the chassis cylinder) ----
     // Children must outlive the compound, so they are owned here as separate
     // members (btCompoundShape holds raw pointers and does not free them).
     float radius = m_diameter * 0.5f;
     float halfH  = m_height * 0.5f;
 
-    // The chassis's *collision* radius is intentionally smaller than its
-    // rendered/nominal radius, by pocket_depth: a real dribbler ball sits
-    // partly recessed into the front of the robot ("лунка"), not flush
-    // against a full-radius cylinder, and Dribbler's forward_offset (see its
-    // own init) is chosen so the captured ball's near surface lands exactly
-    // on this shrunk radius — giving it real solid structure to rest against
-    // (serving the purpose a separate "lip" bump used to) instead of the
-    // hand-rolled capture force fighting a full-size solid cylinder for that
-    // last pocket_depth of penetration every frame (the same "hand-rolled
-    // force vs. real Bullet contact" instability class documented in
-    // docs/tasks/dribbler-kicker.md's "Force model revision" — this is that
-    // same bug, hit again during a later revision, fixed the same way: don't
-    // make the hand-rolled force fight real contact for the same space).
-    // Known simplification: this shrinks the *whole* cylinder uniformly, not
-    // just a frontal notch/arc (a true partial-circle pocket would need a
-    // compound of many convex pieces to approximate a concave cutout, which
-    // Bullet shapes can't represent directly) — so a ball or wall can in
-    // principle approach pocket_depth closer to the chassis on any side, not
-    // just the front. Harmless today (single robot, no robot-vs-robot
-    // collision yet), but worth revisiting if that changes.
+    // The chassis's collision boundary is at the full configured radius
+    // everywhere *except* a narrow notch in front of the dribbler, recessed
+    // inward by pocket_depth, matching the roller's own width — a real
+    // dribbler ball sits partly recessed into the front of the robot
+    // ("лунка"), not flush against a full-radius cylinder, and Dribbler's
+    // forward_offset (see its own init) is chosen so the captured ball's near
+    // surface lands exactly on this shrunk radius — giving it real solid
+    // structure to rest against (serving the purpose a separate "lip" bump
+    // used to) instead of the hand-rolled capture force fighting a full-size
+    // solid cylinder for that last pocket_depth of penetration every frame
+    // (the same "hand-rolled force vs. real Bullet contact" instability class
+    // documented in docs/tasks/dribbler-kicker.md's "Force model revision").
+    //
+    // An earlier version of this shrank the *whole* cylinder uniformly (not
+    // just the notch), which was simpler but meant a ball approaching from
+    // any *other* direction visibly sank up to pocket_depth into the
+    // chassis's own rendered mesh before colliding — reported 2026-09-24.
+    // Bullet's dynamic rigid bodies can only be convex or a compound of
+    // convex pieces (a true concave dimple can't be one convex shape), so the
+    // fix approximates the boundary as a fan of kChassisWedgeCount angular
+    // wedge boxes at the full radius, with the handful overlapping the
+    // dribbler's angular width shortened to collisionRadius instead — leaving
+    // a real, localized gap only there. This collision notch is flat, not a
+    // true spherical cap: the *physically correct*, perpendicular-to-the-
+    // ball's-own-curvature holding force during actual capture comes from
+    // Dribbler's hand-rolled force model (docs/tasks/dribbler-kicker.md,
+    // "Third revision"), not from this geometry — this notch only needs to
+    // be roughly the right size/depth so an unpowered ball has real structure
+    // to rest on (decision #4) and nothing visibly clips into the mesh
+    // elsewhere. Known simplification, same spirit as the pocket_grip_gain
+    // note below: a curved notch was judged not worth a much larger compound
+    // (dozens of finely-angled pieces) for a shape the collision response
+    // barely needs to get right, since the force model already does the
+    // physically-important part.
     float pocketDepth = cfg.getFloat("/robot/dribbler/pocket_depth", 15.0f) / MM;
     float collisionRadius = std::max(radius - pocketDepth, radius * 0.5f);
+    float dribblerLength = cfg.getFloat("/robot/dribbler/length", 70.0f) / MM;
+    // Notch half-angle: the angular half-width, as seen from the chassis
+    // center, that the dribbler's own capture width (length) subtends at the
+    // chassis radius -- i.e. how wide a bite the pocket needs to be.
+    float notchHalfAngle = std::atan2(dribblerLength * 0.5f, radius);
 
-    m_chassisShape = std::make_unique<btCylinderShape>(btVector3(collisionRadius, halfH, collisionRadius));
+    constexpr int kChassisWedgeCount = 24; // 15 deg each; sagitta ~0.9mm at a 90mm radius
+    const float wedgeStep = (2.0f * glm::pi<float>()) / (float)kChassisWedgeCount;
+    const float wedgeHalfAngle = wedgeStep * 0.5f;
 
     m_collisionShape = std::make_unique<btCompoundShape>();
-    btTransform identity;
-    identity.setIdentity();
-    m_collisionShape->addChildShape(identity, m_chassisShape.get());
+
+    for (int i = 0; i < kChassisWedgeCount; i++) {
+        float theta = wedgeStep * (float)i;
+        float wrapped = theta;
+        if (wrapped > glm::pi<float>()) wrapped -= 2.0f * glm::pi<float>();
+        // Local +X is "forward" (see AGENTS.md's yaw convention) -- the notch
+        // is centered on angle 0, matching Dribbler's forward_offset axis.
+        bool inNotch = std::fabs(wrapped) < (notchHalfAngle + wedgeHalfAngle);
+
+        float wedgeRadius = inNotch ? collisionRadius : radius;
+        float halfDepth = wedgeRadius * 0.5f;
+        // Chord half-width at this wedge's outer radius, so adjacent wedges'
+        // outer corners meet at (approximately) the same boundary point.
+        float halfWidth = wedgeRadius * std::sin(wedgeHalfAngle);
+
+        auto box = std::make_unique<btBoxShape>(btVector3(halfDepth, halfH, halfWidth));
+        btTransform t;
+        t.setIdentity();
+        // Rotate the box's local +X (its radial/outward axis) to point at
+        // world-local angle `wrapped`; Bullet's Y-axis quaternion rotation
+        // maps local +X to (cos(a), 0, -sin(a)), so use -wrapped to land on
+        // (cos(wrapped), 0, sin(wrapped)) instead.
+        t.setRotation(btQuaternion(btVector3(0.0f, 1.0f, 0.0f), -wrapped));
+        t.setOrigin(btVector3(halfDepth * std::cos(wrapped), 0.0f, halfDepth * std::sin(wrapped)));
+        m_collisionShape->addChildShape(t, box.get());
+        m_chassisWedgeShapes.push_back(std::move(box));
+    }
 
     btScalar mass = m_mass;
     btVector3 localInertia(0.0f, 0.0f, 0.0f);
-    m_chassisShape->calculateLocalInertia(mass, localInertia);
+    // Only the Y component actually matters: setAngularFactor below zeros X/Z
+    // rotation entirely (no tipping), so the compound's own (approximate)
+    // aggregate inertia is fine for the X/Z components Bullet still wants a
+    // value for.
+    m_collisionShape->calculateLocalInertia(mass, localInertia);
 
     // Yaw inertia about the vertical (Y) axis drives turning. The config key is
     // named "z" for the spin axis; absent/null means "solid-cylinder default".

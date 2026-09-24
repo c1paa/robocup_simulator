@@ -4,6 +4,7 @@
 #include "mirror_profile.h"
 #include <btBulletDynamicsCommon.h>
 #include <memory>
+#include <vector>
 
 class Config;
 class Renderer;
@@ -104,10 +105,11 @@ private:
     float m_cosTheta[kOmniWheels];
     glm::mat3 m_invKinematics = glm::mat3(1.0f);
 
-    // ---- Bullet rigid body (compound: chassis cylinder, currently the only
-    // child — see the pocket_depth comment in Robot::init) ----
+    // ---- Bullet rigid body (compound: a fan of angular wedge boxes
+    // approximating the chassis cylinder, full radius except at the frontal
+    // dribbler notch — see the pocket_depth comment in Robot::init) ----
     btDiscreteDynamicsWorld* m_world = nullptr;
-    std::unique_ptr<btCylinderShape> m_chassisShape;
+    std::vector<std::unique_ptr<btBoxShape>> m_chassisWedgeShapes;
     std::unique_ptr<btCompoundShape> m_collisionShape;
     std::unique_ptr<btDefaultMotionState> m_motionState;
     std::unique_ptr<btRigidBody> m_body;
