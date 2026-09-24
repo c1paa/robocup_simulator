@@ -92,6 +92,18 @@ void Dribbler::update(const Robot& robot, Ball& ball, float dt)
         return;
     }
 
+    // Decision #4 in docs/tasks/dribbler-kicker.md: zero commanded speed means
+    // zero capture force -- an unpowered dribbler should only hold a resting
+    // ball via real chassis collision geometry (the recessed pocket), not via
+    // this hand-rolled force. Without this gate, the centering/rigid-attachment
+    // terms below apply purely from being in the capture zone, independent of
+    // dribble_speed -- which actively pulls a ball to pocket-center and drags
+    // it along through robot motion even with the roller commanded to 0.
+    if (std::fabs(m_actualSpeed) < 1e-3f) {
+        m_loadFraction = 0.0f;
+        return;
+    }
+
     // ---- Effective roller radius at this lateral contact (taper profile). ----
     float r = util::lerp(m_radiusCenter, m_radiusEdge, std::fabs(localZ) / halfLen);
 

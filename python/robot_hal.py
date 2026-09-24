@@ -21,6 +21,7 @@ import os
 import sys
 import queue
 import threading
+import time
 
 
 def _ensure_generated_stubs():
@@ -112,14 +113,39 @@ class SimRobotHAL:
 
     # ---- lifecycle ----
 
-    def connect(self):
-        """Start the background sensor reader and command stream."""
+    def connect(self, timeout=15.0):
+        """Start the background sensor reader and command stream, and block
+        until the simulator is actually ready: the gRPC channel is up AND the
+        first SensorData message has arrived. Prints progress to the console
+        while waiting (connecting can take a few seconds while the simulator
+        window is still starting up). Raises RuntimeError if `timeout` seconds
+        pass without either step completing.
+        """
         if self._sensor_thread is not None:
             return
+
+        print(f"[SimRobotHAL] connecting to simulator...")
+        try:
+            grpc.channel_ready_future(self._channel).result(timeout=timeout)
+        except grpc.FutureTimeoutError:
+            raise RuntimeError(
+                f"Could not reach the simulator within {timeout}s. Is it running? "
+                "(./run_simulator.sh)")
+        print("[SimRobotHAL] channel connected, waiting for first sensor frame...")
+
         self._sensor_thread = threading.Thread(target=self._sensor_loop, daemon=True)
         self._sensor_thread.start()
         self._command_thread = threading.Thread(target=self._command_loop, daemon=True)
         self._command_thread.start()
+
+        deadline = time.time() + timeout
+        while self._latest_data() is None:
+            if time.time() > deadline:
+                raise RuntimeError(
+                    f"Connected to the simulator but received no sensor data within "
+                    f"{timeout}s (robot_id={self._robot_id} mismatch?).")
+            time.sleep(0.05)
+        print("[SimRobotHAL] connected, first sensor frame received.")
 
     def close(self):
         """Stop the background streams and release the channel."""

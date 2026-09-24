@@ -88,7 +88,7 @@ construction.
 | Method | Description |
 |---|---|
 | `SimRobotHAL(host="localhost", port=50051, robot_id=0)` | Construct the client. `robot_id` lets multiple robots share one simulator once multi-robot support lands (see `ROADMAP.md` item 6) — today there is exactly one robot, always `robot_id=0`. |
-| `connect()` | Starts two background daemon threads: one reading the `SensorStream`, one draining a command queue into `SendCommand`. Idempotent — safe to call once, ignored on repeat calls. |
+| `connect(timeout=15.0)` | Starts two background daemon threads (one reading the `SensorStream`, one draining a command queue into `SendCommand`) and **blocks** until the simulator is actually ready: the gRPC channel is up and the first `SensorData` message has arrived, printing progress to the console while it waits. Raises `RuntimeError` if `timeout` seconds pass first. Idempotent — safe to call once, ignored on repeat calls. Because it blocks until data has actually arrived, you don't need to poll `get_pose()` in a loop afterward — it's safe to call sensor/command methods immediately after `connect()` returns. |
 | `close()` | Stops both background threads and closes the gRPC channel. Call this when your control loop exits. |
 
 ### Sensors (all read the single most-recently-received `SensorData` message; each returns `None` until the first message arrives after `connect()`)

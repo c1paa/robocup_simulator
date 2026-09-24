@@ -56,9 +56,9 @@
             "chip_max_angle": 30
         },
         "dribbler": {
-            "max_speed": 4000.0,
+            "max_speed": 1000.0,
             "radius_center": 8,
-            "radius_edge": 14,
+            "radius_edge": 12,
             "length": 70,
             "forward_offset": 96.5,
             "height_offset": 25,

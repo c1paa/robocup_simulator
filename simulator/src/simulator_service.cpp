@@ -24,6 +24,23 @@ grpc::Status SimulatorServiceImpl::SendCommand(
         m_state.dribbleSpeed = cmd.dribble_speed();
     }
 
+    // Client stream ended -- gracefully (close()) or because the process
+    // died/crashed. Either way, fail-safe: stop driving/dribbling instead of
+    // replaying the last command forever (setBodyVelocity/setTargetSpeed are
+    // persistent state the sim keeps applying every tick, so without this the
+    // robot/dribbler would keep going indefinitely after the client is gone).
+    // kick_power is already one-shot (consumed once in GrpcServer::update),
+    // so zeroing it here is just for tidiness, not required for safety.
+    {
+        std::lock_guard<std::mutex> lock(m_state.mtx);
+        m_state.hasCommand = true;
+        m_state.vx = 0.0f;
+        m_state.vy = 0.0f;
+        m_state.omega = 0.0f;
+        m_state.kickPower = 0.0f;
+        m_state.dribbleSpeed = 0.0f;
+    }
+
     response->set_success(true);
     response->set_message("ok");
     return grpc::Status::OK;
