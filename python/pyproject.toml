@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "robocup-sim-client"
 version = "0.1.0"
-description = "Client HAL for the robocup_sumilator gRPC simulator (SimRobotHAL): drive commands, camera, lidar, dribbler, kicker, pose/odometry."
+description = "Client HAL for the robocup_simulator gRPC simulator (SimRobotHAL): drive commands, camera, lidar, dribbler, kicker, pose/odometry."
 requires-python = ">=3.8"
 dependencies = [
     "grpcio",

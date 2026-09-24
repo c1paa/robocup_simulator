@@ -53,7 +53,7 @@ def _ensure_generated_stubs():
         raise RuntimeError(
             f"No generated gRPC stubs at {stub}, and the .proto source ({proto}) "
             "doesn't exist either. robot_hal.py needs to run from inside the "
-            "robocup_sumilator repo (a plain clone or `pip install -e`), not a "
+            "robocup_simulator repo (a plain clone or `pip install -e`), not a "
             "standalone copy of just this file."
         )
 

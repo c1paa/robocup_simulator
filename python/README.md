@@ -16,14 +16,14 @@ Clone this repo as a subfolder of your own robot-control project, next to your o
 
 ```
 my_robot_project/
-├── robocup_simulator/        <- git clone https://github.com/c1paa/robocup_sumilator.git
+├── robocup_simulator/        <- git clone https://github.com/c1paa/robocup_simulator.git
 ├── src/                      <- your own control code
 └── files/                    <- anything else of yours (data, configs, ...)
 ```
 
 ```bash
 cd my_robot_project
-git clone https://github.com/c1paa/robocup_sumilator.git
+git clone https://github.com/c1paa/robocup_simulator.git
 
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e ./robocup_simulator/python        # registers `robot_hal` as an importable module

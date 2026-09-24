@@ -5,7 +5,7 @@
 
 static void printUsage(const char* prog)
 {
-    std::cout << "RoboCup Sumilator v0.1\n\n"
+    std::cout << "RoboCup Simulator v0.1\n\n"
               << "Usage: " << prog << " [options]\n\n"
               << "Options:\n"
               << "  --config-dir <path>   Path to configs directory (default: configs/)\n"
