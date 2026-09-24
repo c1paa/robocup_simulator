@@ -92,6 +92,7 @@ set(SOURCES
     src/config.cpp
     src/grpc_server.cpp
     src/simulator_service.cpp
+    src/debug_overlay.cpp
 )
 
 set(GENERATED_SOURCES
@@ -109,6 +110,7 @@ target_include_directories(simulator PRIVATE
     ${OPENGL_INCLUDE_DIRS}
     ${BULLET_INCLUDE_DIRS}
     ${GENERATED_PROTO_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/third_party
 )
 
 target_link_libraries(simulator PRIVATE

@@ -15,6 +15,7 @@ class LidarSensor;
 class Dribbler;
 class Kicker;
 class GrpcServer;
+class DebugOverlay;
 
 class App
 {
@@ -55,6 +56,7 @@ private:
     std::unique_ptr<Dribbler> m_dribbler;
     std::unique_ptr<Kicker> m_kicker;
     std::unique_ptr<GrpcServer> m_grpc;
+    std::unique_ptr<DebugOverlay> m_debugOverlay;
 
     // Timing
     Uint64 m_lastTick = 0;
@@ -93,6 +95,7 @@ private:
     bool m_showGrid = true;
     bool m_showPhysicsDebug = false;
     bool m_showCameraPreview = false;
+    bool m_showTelemetryOverlay = false;
 
     // Manual robot drive (arrow keys + Q/E) — independent of gRPC SendCommand.
     // Only sent on press/release edges so it doesn't fight an active gRPC

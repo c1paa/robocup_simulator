@@ -51,7 +51,11 @@ Builds automatically first if the binary is missing. Options:
   turn), independent of gRPC `SendCommand` — handy for trying it out without a
   Python client
 - Q / E — strafe the robot left / right
+- Space (hold) — spin the dribbler at full capture speed; F — fire the kicker,
+  both independent of gRPC the same way the drive keys are
 - C — toggle the in-window mirror-camera preview overlay
+- L — toggle the telemetry overlay (position/odometry, dribbler RPM, kicker
+  capacitor charge, ball position relative to the robot)
 - Esc — quit
 
 ## Python client

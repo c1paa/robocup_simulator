@@ -10,9 +10,12 @@
 #include "kicker.h"
 #include "config.h"
 #include "grpc_server.h"
+#include "debug_overlay.h"
 
 #include <iostream>
 #include <cmath>
+#include <sstream>
+#include <iomanip>
 
 App::App() = default;
 
@@ -57,6 +60,7 @@ bool App::init(const std::string& configDir)
     m_dribbler = std::make_unique<Dribbler>();
     m_kicker   = std::make_unique<Kicker>();
     m_grpc     = std::make_unique<GrpcServer>();
+    m_debugOverlay = std::make_unique<DebugOverlay>();
 
     m_physics->init(cfg);
     m_field->init(cfg);
@@ -66,6 +70,7 @@ bool App::init(const std::string& configDir)
     m_lidar->init(cfg, m_physics->world());
     m_dribbler->init(cfg);
     m_kicker->init(cfg);
+    m_debugOverlay->init();
     m_renderer->init(m_width, m_height);
     m_renderer->setLighting(
         glm::vec3(cfg.getFloat("/scene/light/direction/0", 0.5f),
@@ -91,9 +96,10 @@ bool App::init(const std::string& configDir)
 
 void App::shutdown()
 {
-    if (m_grpc)     m_grpc->stop();
-    if (m_camera)   m_camera->shutdown();
-    if (m_renderer) m_renderer->shutdown();
+    if (m_grpc)         m_grpc->stop();
+    if (m_camera)       m_camera->shutdown();
+    if (m_debugOverlay) m_debugOverlay->shutdown();
+    if (m_renderer)     m_renderer->shutdown();
     if (m_glContext) SDL_GL_DeleteContext(m_glContext);
     if (m_window)    SDL_DestroyWindow(m_window);
 
@@ -230,6 +236,9 @@ void App::handleEvent(const SDL_Event& e)
         }
         if (e.key.keysym.scancode == SDL_SCANCODE_C) {
             m_showCameraPreview = !m_showCameraPreview;
+        }
+        if (e.key.keysym.scancode == SDL_SCANCODE_L) {
+            m_showTelemetryOverlay = !m_showTelemetryOverlay;
         }
         break;
     case SDL_KEYUP:
@@ -404,6 +413,38 @@ void App::render()
     if (m_showCameraPreview) {
         glViewport(0, 0, m_width, m_height);
         m_camera->drawPreview(m_width, m_height);
+    }
+
+    // ---- Telemetry overlay (L key) ----
+    if (m_showTelemetryOverlay && m_debugOverlay) {
+        glViewport(0, 0, m_width, m_height);
+
+        glm::vec3 pos = m_robot->position();
+        glm::vec3 ballPos = m_ball->position();
+        float yaw = m_robot->orientation();
+        float cosYaw = std::cos(yaw), sinYaw = std::sin(yaw);
+        float dx = ballPos.x - pos.x, dz = ballPos.z - pos.z;
+        float ballLocalX = cosYaw * dx - sinYaw * dz;
+        float ballLocalZ = sinYaw * dx + cosYaw * dz;
+
+        std::ostringstream ss;
+        ss << std::fixed << std::setprecision(3);
+        std::vector<std::string> lines;
+
+        ss.str(""); ss << "pos x=" << pos.x << " z=" << pos.z << " yaw=" << yaw;
+        lines.push_back(ss.str());
+        ss.str(""); ss << "vel=" << m_robot->velocity() << " m/s  omega=" << m_robot->angularVelocity() << " rad/s";
+        lines.push_back(ss.str());
+        ss.str(""); ss << "odom x=" << m_robot->odometryX() << " z=" << m_robot->odometryZ() << " yaw=" << m_robot->odometryYaw();
+        lines.push_back(ss.str());
+        ss.str(""); ss << "dribbler rpm=" << std::setprecision(0) << m_dribbler->rpm();
+        lines.push_back(ss.str());
+        ss.str(""); ss << std::setprecision(3) << "kicker charge=" << m_kicker->charge() * 100.0f << " %";
+        lines.push_back(ss.str());
+        ss.str(""); ss << "ball local fwd=" << ballLocalX << " lat=" << ballLocalZ;
+        lines.push_back(ss.str());
+
+        m_debugOverlay->draw(m_width, m_height, lines);
     }
 }
 
