@@ -49,12 +49,40 @@
             "pillar_width": 8,
             "pillar_radial_offset": 0
         },
+        "battery": {
+            "working_voltage": 16.0,
+            "internal_resistance": 0.05
+        },
+        "capacitor": {
+            "capacitance_uf": 20000,
+            "charge_voltage": 48.0,
+            "charge_resistance": 2.0,
+            "boost_efficiency": 0.85,
+            "boost_max_current": 5.0,
+            "esr": 0.05,
+            "leakage_resistance": 1.0e6
+        },
         "kicker": {
-            "max_power": 0.3,
-            "charge_time": 0.2,
+            "coil_resistance": 0.6,
+            "coil_inductance": 0.0008,
+            "force_constant": 900,
+            "armature_mass": 0.015,
+            "stroke": 8,
+            "spring_constant": 300,
+            "damping_coefficient": 5,
+            "restitution": 0.3,
+            "short_circuit_resistance": 0.1,
+            "debug_impulse": 6.0,
             "height_offset": 0.0,
             "range": 40,
             "chip_max_angle": 30
+        },
+        "imu": {
+            "update_rate_hz": 100,
+            "roll_pitch_noise_std_deg": 1.0,
+            "yaw_noise_std_deg": 2.5,
+            "accel_noise_std": 0.03,
+            "gyro_noise_std_deg": 0.3
         },
         "dribbler": {
             "max_speed": 1000.0,

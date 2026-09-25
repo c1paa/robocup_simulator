@@ -82,6 +82,22 @@ were implemented.
    offset only ever changes spin, never trajectory), so the ball never actually gained vertical
    velocity at any offset. Fixed by giving `height_offset < 0` a real upward tilt on the impulse
    itself (`/robot/kicker/chip_max_angle`), approximating the angled plate a real chip kicker uses.
+   Later rewritten from a `[0,1]` power-request model into a real electrical/mechanical simulation:
+   `openCapacitor()`/`closeCapacitor()`/`openKicker()`/`closeKicker()` are independent, client-timed
+   switches driving an RC capacitor charge model, an RL coil discharge model, and a spring/damper
+   armature that delivers impulse to the ball on contact; opening both switches at once is a
+   modeled short circuit (severe, real bus-voltage sag). The `F`-key debug shortcut now explicitly
+   bypasses the capacitor (`Kicker::debugFire`). See "Electrical rewrite" in
+   [`docs/tasks/dribbler-kicker.md`](docs/tasks/dribbler-kicker.md).
+
+5b. ~~IMU sensor~~ — done: a BNO055-modeled 9-axis absolute orientation sensor (`ImuSensor`) —
+    fused roll/pitch/yaw (magnetometer-anchored, so yaw doesn't accumulate drift the way raw gyro
+    integration would), gravity-removed body-frame linear acceleration, and body-frame angular
+    velocity, all with datasheet-informed noise, updating at its own `update_rate_hz` independent
+    of the render tick. Streamed over gRPC (`SensorData.imu_*`) and exposed via
+    `SimRobotHAL.get_imu_orientation()`/`get_imu_acceleration()`/`get_imu_angular_velocity()`,
+    mirroring the real driver's own `getVector(VECTOR_*)` call shape. See
+    [`docs/tasks/imu-sensor.md`](docs/tasks/imu-sensor.md).
 
 6. **Multi-robot support** — `App` holds a single `std::unique_ptr<Robot> m_robot`, but
    `SensorRequest`/`RobotCommand` already carry `robot_id`. If the target league needs more

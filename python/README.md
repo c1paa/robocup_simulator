@@ -72,7 +72,16 @@ hal.send_velocity(0.5, 0.0, 0.0)   # drive forward at 0.5 m/s (body-frame)
 hal.dribble(1.0)                    # spin the dribbler in the capture direction
 print(hal.get_pose())               # (x, y, z, yaw) ground truth
 
-hal.kick(1.0)                       # fire the kicker at full requested power
+# Kicker: charge the capacitor, then fire it -- you control both durations
+# yourself, same as real hardware. Never open both at once (short circuit).
+hal.open_capacitor()
+time.sleep(0.5)
+hal.close_capacitor()
+hal.open_kicker()
+time.sleep(0.02)
+hal.close_kicker()
+
+print(hal.get_imu_orientation())    # (roll, pitch, yaw), radians
 
 hal.close()
 ```
@@ -100,7 +109,12 @@ construction.
 | `get_odometry()` | `(x, z, yaw)` | Dead-reckoning estimate integrated from commanded wheel speeds, deliberately drifts away from `get_pose()` under wheel slip — this is what a real robot's encoders would report. This is the one to use if you're writing control code meant to also run on real hardware later. |
 | `get_ball_position()` | `(x, y, z)` | Ball ground truth (meters). No onboard ball-detection sensor exists (that's what `get_camera_frame()` + your own vision code is for) — this is for debugging/scoring only. |
 | `get_dribbler_rpm()` | float | Dribbler roller's actual (lagged, load-sagged) speed in RPM, signed like `dribble_speed` (positive = capture direction). |
-| `get_capacitor_charge()` | float, `0.0`-`1.0` | Kicker capacitor charge. Poll this before `kick()` if you want to know whether a kick will actually be at full power — see `kick()` below. |
+| `get_capacitor_charge()` | float, `0.0`-`1.0` | Kicker capacitor charge fraction (`capacitor_voltage / charge_voltage`). |
+| `get_capacitor_voltage()` | float, volts | Kicker capacitor's actual voltage, `0.0` up to `/robot/capacitor/charge_voltage` (48V by default). |
+| `get_bus_voltage()` | float, volts | Robot's current (sagged) power bus voltage. Sags while charging the capacitor; collapses hard if `open_capacitor()` and `open_kicker()` are both active — see `open_kicker()`. |
+| `get_imu_orientation()` | `(roll, pitch, yaw)`, radians | BNO055-modeled fused absolute orientation. Not integrated from the gyro — yaw doesn't accumulate drift, only small bounded noise (magnetometer-anchored heading, like the real sensor's fusion mode). |
+| `get_imu_acceleration()` | `(x, y, z)`, m/s² | Linear acceleration, robot body frame, gravity already removed (mirrors the real driver's `VECTOR_LINEARACCEL`). |
+| `get_imu_angular_velocity()` | `(x, y, z)`, rad/s | Angular velocity, robot body frame (mirrors the real driver's `VECTOR_GYROSCOPE`); `y` matches `get_pose()`'s yaw rate, plus sensor noise. |
 | `get_lidar_scan()` | `(N, 3)` float32 `numpy` array `[angle, distance, intensity]`, or `None` | Latest *completed* 360° sweep (paced by its own scan rate, independent of the sensor stream's frame rate). `angle` is radians in the robot's body frame, `0` = forward (`+X`), positive = left (same sense as `omega`/yaw). `distance` in meters, `intensity` a synthetic `0.0`-`1.0` confidence value. |
 
 ### Commands
@@ -109,11 +123,12 @@ construction.
 |---|---|
 | `send_velocity(vx, vy, omega)` | Body-frame drive command: `vx` forward (m/s), `vy` lateral (m/s), `omega` yaw rate (rad/s). Clamped simulator-side to the configured motor limits (`/robot/motor/max_linear_speed`/`max_angular_speed` in `robot.json`). Persistent — keeps applying every tick until you call it again (e.g. with all zeros to stop). |
 | `dribble(speed)` | Dribbler roller speed, `-1.0` to `1.0`. Positive = capture direction (pulls a ball in and holds it), negative = eject. Persistent, same as `send_velocity`. |
-| `kick(power)` | Requests a kick at `power` in `[0.0, 1.0]`. **One-shot**, unlike the two above — it rides along on a single command and is not re-sent when you next call `send_velocity()`/`dribble()`, so it won't re-fire on its own. The impulse actually delivered is `min(power, capacitor_charge) * max_power` — a kick requested before the capacitor has recharged (`/robot/kicker/charge_time` after the last kick) will be measurably weaker; poll `get_capacitor_charge()` first if that matters to your control logic. Only does anything if the ball is within `/robot/kicker/range` of the kick point. |
+| `open_capacitor()` / `close_capacitor()` | Charging switch (boost converter → capacitor). Persistent, like `send_velocity` — stays closed until you call `close_capacitor()`. You control charge duration yourself; poll `get_capacitor_voltage()`/`get_capacitor_charge()` to know when it's charged enough. |
+| `open_kicker()` / `close_kicker()` | Discharge switch (capacitor → solenoid coil). Persistent, same pattern. You control fire duration yourself — a real strike completes in a few milliseconds; holding it open longer does nothing further once the capacitor is spent. **Never call this while the capacitor switch is also open** — both open at once is a real short circuit (the discharge path bypasses the charge resistor's current limiting), and the simulator models the consequence: `get_bus_voltage()` collapses hard and the kick comes out weak/erratic, exactly like mismanaging the two gates would on real hardware. |
 
-`send_velocity`/`dribble`/`kick` all only take effect if the ball/robot is actually in the right
-physical state (e.g. `kick()` needs the ball within range) — none of them raise on a no-op call,
-they just don't do anything that tick.
+None of these raise on a no-op call (e.g. `open_kicker()` when the ball is out of
+`/robot/kicker/range`) — they just don't do anything that tick. See `docs/tasks/dribbler-kicker.md`
+in the main repo for the full capacitor/coil/armature electrical model behind these switches.
 
 ## Why a HAL, not raw gRPC
 

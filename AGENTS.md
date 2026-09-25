@@ -57,14 +57,18 @@ Class responsibilities (see their headers for the exact interface):
   contact was solver-unstable), with motor lag, load-based speed sag, and a tapered-roller
   capture zone. Owned by `App` (needs both robot pose and ball state). See
   [`docs/tasks/dribbler-kicker.md`](docs/tasks/dribbler-kicker.md).
-- `Kicker` — the solenoid kicker: an impulse (`applyImpulse` at the configured plunger-height
-  offset) capped by a capacitor charge that is actually simulated (drains on fire, recharges
-  over `charge_time`). Negative `height_offset` also tilts the impulse vector itself upward
-  (`/robot/kicker/chip_max_angle`, scaled by how far below center the offset is) to produce a real
-  chip — a pure position-offset impulse can't do this on its own, since `applyImpulse`'s linear
-  velocity change is independent of the offset point (see the comment above
-  `Kicker::requestKick`). Owned by `App`, same pattern as `Dribbler`. See
-  [`docs/tasks/dribbler-kicker.md`](docs/tasks/dribbler-kicker.md).
+- `Kicker` — the solenoid kicker, capacitor, and battery bus, simulated as a real electrical/
+  mechanical system rather than a `[0,1]` power request: `openCapacitor()`/`closeCapacitor()` and
+  `openKicker()`/`closeKicker()` are independent, client-timed switches (charging path and
+  discharge path), driving an RC capacitor charge model, an RL coil discharge model, and a
+  spring/damper armature that delivers a real impulse to the ball on contact. Opening both
+  switches at once is a modeled short circuit (severe bus-voltage sag). `debugFire()` (bound to
+  the `F` key) is a fixed-impulse debug shortcut that bypasses the capacitor entirely. Negative
+  `height_offset` also tilts the impulse vector itself upward (`/robot/kicker/chip_max_angle`,
+  scaled by how far below center the offset is) to produce a real chip — a pure position-offset
+  impulse can't do this on its own, since `applyImpulse`'s linear velocity change is independent
+  of the offset point. Owned by `App`, same pattern as `Dribbler`. See
+  [`docs/tasks/dribbler-kicker.md`](docs/tasks/dribbler-kicker.md)'s "Electrical rewrite" section.
 - `MirrorProfile` — mirror shape (`cone`/`hyperbola`/`profile`) as a profile function
   `r = f(h)`; the single source of truth for mirror geometry, used both for the drawn mesh
   (`Robot`) and the optics (`Camera`). `type: "profile"` loads a real (or externally-measured)
@@ -78,6 +82,12 @@ Class responsibilities (see their headers for the exact interface):
   `scan_frequency`, independent of the render/physics tick) with range/noise/dropout matched to
   the real sensor; publishes the latest completed scan over gRPC. Depends on the static
   field-boundary wall boxes added by `Physics`.
+- `ImuSensor` — BNO055-modeled 9-axis absolute orientation sensor: fused roll/pitch/yaw (not
+  gyro-integrated, so yaw doesn't accumulate drift — magnetometer-anchored heading, matched noise
+  only), gravity-removed body-frame linear acceleration (finite-differenced from the robot's own
+  world velocity), and body-frame angular velocity. Updates at its own `update_rate_hz`,
+  independent of the render tick (same pattern as `LidarSensor`'s `scan_frequency`). Owned by
+  `App`. See [`docs/tasks/imu-sensor.md`](docs/tasks/imu-sensor.md).
 - `GrpcServer` / `SimulatorServiceImpl` — real gRPC server (`SensorStream`/`SendCommand`),
   bridged to the sim thread via the mutex-guarded `SharedState` (`shared_state.h`).
 - `Config` — JSON config singleton, dot-path lookup (`cfg.getFloat("/robot/diameter", ...)`).

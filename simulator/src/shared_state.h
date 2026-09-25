@@ -32,9 +32,16 @@ struct SharedState
     glm::vec3 ballPosition{0.0f, 0.0f, 0.0f};
 
     // Dribbler motor's actual (lagged, load-sagged) speed (RPM, signed like
-    // dribble_speed) and kicker capacitor charge (0..1).
+    // dribble_speed) and kicker electrical state.
     float dribblerRpm = 0.0f;
-    float capacitorCharge = 1.0f;
+    float capacitorCharge = 0.0f;   // 0..1, capacitorVoltage / chargeVoltage
+    float busVoltage = 16.0f;       // V
+    float capacitorVoltage = 0.0f;  // V
+
+    // IMU (BNO055-modeled), body frame -- see imu_sensor.h.
+    float imuRoll = 0.0f, imuPitch = 0.0f, imuYaw = 0.0f;
+    glm::vec3 imuAccel{0.0f, 0.0f, 0.0f};
+    glm::vec3 imuGyro{0.0f, 0.0f, 0.0f};
 
     // Dead-reckoning odometry (drifts from ground truth under slip)
     float odomX = 0.0f;
@@ -49,6 +56,7 @@ struct SharedState
     float vx = 0.0f;
     float vy = 0.0f;
     float omega = 0.0f;
-    float kickPower = 0.0f;
     float dribbleSpeed = 0.0f;
+    bool capacitorChargeOpen = false;
+    bool kickerOpen = false;
 };

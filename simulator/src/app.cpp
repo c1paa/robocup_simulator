@@ -8,6 +8,7 @@
 #include "lidar_sensor.h"
 #include "dribbler.h"
 #include "kicker.h"
+#include "imu_sensor.h"
 #include "config.h"
 #include "grpc_server.h"
 #include "debug_overlay.h"
@@ -60,6 +61,7 @@ bool App::init(const std::string& configDir)
     m_lidar    = std::make_unique<LidarSensor>();
     m_dribbler = std::make_unique<Dribbler>();
     m_kicker   = std::make_unique<Kicker>();
+    m_imu      = std::make_unique<ImuSensor>();
     m_grpc     = std::make_unique<GrpcServer>();
     m_debugOverlay = std::make_unique<DebugOverlay>();
 
@@ -71,6 +73,8 @@ bool App::init(const std::string& configDir)
     m_lidar->init(cfg, m_physics->world());
     m_dribbler->init(cfg);
     m_kicker->init(cfg);
+    m_kicker->setActors(m_robot.get(), m_ball.get());
+    m_imu->init(cfg);
     m_debugOverlay->init();
     m_renderer->init(m_width, m_height);
     m_renderer->setLighting(
@@ -89,6 +93,7 @@ bool App::init(const std::string& configDir)
     m_grpc->setBall(m_ball.get());
     m_grpc->setDribbler(m_dribbler.get());
     m_grpc->setKicker(m_kicker.get());
+    m_grpc->setImu(m_imu.get());
     m_grpc->start();
 
     std::cout << "[App] Simulator ready." << std::endl;
@@ -333,10 +338,12 @@ void App::handleKeyboardInput(const Uint8* keys, float dt)
     }
 
     // Space = spin the dribbler at full capture speed while held, stop on
-    // release. F = fire the kicker at full requested power, once per press
-    // (edge-triggered — holding it down must not spam requestKick every
-    // frame, each call would just keep re-draining whatever charge has
-    // trickled back in).
+    // release. F = debug-fire the kicker at a fixed impulse, once per press
+    // (edge-triggered — holding it down must not fire every frame). This is
+    // the debug shortcut only: it bypasses the capacitor/electrical model
+    // completely (see Kicker::debugFire) -- real client code drives the
+    // kicker through open_capacitor()/close_capacitor()/open_kicker()/
+    // close_kicker() over gRPC instead, same as SimRobotHAL.
     bool dribbleHeld = keys[SDL_SCANCODE_SPACE] != 0;
     if (m_dribbler && dribbleHeld != m_lastManualDribbleHeld) {
         m_dribbler->setTargetSpeed(dribbleHeld ? 1.0f : 0.0f);
@@ -345,7 +352,7 @@ void App::handleKeyboardInput(const Uint8* keys, float dt)
 
     bool kickHeld = keys[SDL_SCANCODE_F] != 0;
     if (kickHeld && !m_lastManualKickHeld && m_kicker && m_robot && m_ball) {
-        m_kicker->requestKick(*m_robot, *m_ball, 1.0f);
+        m_kicker->debugFire(*m_robot, *m_ball);
     }
     m_lastManualKickHeld = kickHeld;
 }
@@ -364,6 +371,7 @@ void App::update(float dt)
     m_robot->syncFromPhysics();
     m_ball->syncFromPhysics();
     m_lidar->update(m_robot->position(), m_robot->orientation(), dt);
+    m_imu->update(*m_robot, dt);
     m_grpc->update(dt);
 }
 
@@ -440,9 +448,13 @@ void App::render()
         lines.push_back(ss.str());
         ss.str(""); ss << "dribbler rpm=" << std::setprecision(0) << m_dribbler->rpm();
         lines.push_back(ss.str());
-        ss.str(""); ss << std::setprecision(3) << "kicker charge=" << m_kicker->charge() * 100.0f << " %";
+        ss.str(""); ss << std::setprecision(3) << "cap=" << m_kicker->capacitorVoltage() << "V ("
+            << m_kicker->charge() * 100.0f << "%)  bus=" << m_kicker->busVoltage() << "V";
         lines.push_back(ss.str());
         ss.str(""); ss << "ball local fwd=" << ballLocalX << " lat=" << ballLocalZ;
+        lines.push_back(ss.str());
+        ss.str(""); ss << "imu rpy=" << m_imu->roll() << "," << m_imu->pitch() << "," << m_imu->yaw()
+            << "  gyro_y=" << m_imu->angularVelocity().y;
         lines.push_back(ss.str());
 
         m_debugOverlay->draw(m_width, m_height, lines);

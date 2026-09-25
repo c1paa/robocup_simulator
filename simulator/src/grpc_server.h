@@ -12,6 +12,7 @@ class Camera;
 class LidarSensor;
 class Dribbler;
 class Kicker;
+class ImuSensor;
 class SimulatorServiceImpl;
 
 class GrpcServer
@@ -30,6 +31,7 @@ public:
     void setBall(Ball* ball) { m_ball = ball; }
     void setDribbler(Dribbler* dribbler) { m_dribbler = dribbler; }
     void setKicker(Kicker* kicker) { m_kicker = kicker; }
+    void setImu(ImuSensor* imu) { m_imu = imu; }
 
 private:
     SharedState m_state;
@@ -42,4 +44,5 @@ private:
     LidarSensor* m_lidar = nullptr;
     Dribbler* m_dribbler = nullptr;
     Kicker* m_kicker = nullptr;
+    ImuSensor* m_imu = nullptr;
 };

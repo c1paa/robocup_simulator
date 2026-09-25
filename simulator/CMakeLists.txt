@@ -89,6 +89,7 @@ set(SOURCES
     src/mirror_profile.cpp
     src/dribbler.cpp
     src/kicker.cpp
+    src/imu_sensor.cpp
     src/config.cpp
     src/grpc_server.cpp
     src/simulator_service.cpp

@@ -7,6 +7,7 @@
 #include "lidar_sensor.h"
 #include "dribbler.h"
 #include "kicker.h"
+#include "imu_sensor.h"
 
 #include <grpcpp/grpcpp.h>
 #include <iostream>
@@ -63,10 +64,9 @@ void GrpcServer::update(float dt)
         std::lock_guard<std::mutex> lock(m_state.mtx);
         if (m_state.hasCommand && m_robot) {
             m_robot->setBodyVelocity(m_state.vx, m_state.vy, m_state.omega);
-            if (m_kicker && m_ball) {
-                if (m_state.kickPower > 0.0f) {
-                    m_kicker->requestKick(*m_robot, *m_ball, m_state.kickPower);
-                }
+            if (m_kicker) {
+                m_kicker->setCapacitorOpen(m_state.capacitorChargeOpen);
+                m_kicker->setKickerOpen(m_state.kickerOpen);
             }
             if (m_dribbler) {
                 m_dribbler->setTargetSpeed(m_state.dribbleSpeed);
@@ -105,6 +105,15 @@ void GrpcServer::update(float dt)
         }
         if (m_kicker) {
             m_state.capacitorCharge = m_kicker->charge();
+            m_state.busVoltage = m_kicker->busVoltage();
+            m_state.capacitorVoltage = m_kicker->capacitorVoltage();
+        }
+        if (m_imu) {
+            m_state.imuRoll = m_imu->roll();
+            m_state.imuPitch = m_imu->pitch();
+            m_state.imuYaw = m_imu->yaw();
+            m_state.imuAccel = m_imu->acceleration();
+            m_state.imuGyro = m_imu->angularVelocity();
         }
         m_state.timestamp = std::chrono::duration<double>(
             std::chrono::steady_clock::now().time_since_epoch()).count();

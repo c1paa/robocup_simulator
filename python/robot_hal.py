@@ -3,10 +3,11 @@
 simulator's gRPC sensor/command API.
 
 `SimRobotHAL` wraps the gRPC `SensorStream` (camera frame, pose, odometry,
-lidar) and `SendCommand` (drive / kick / dribble) calls behind hardware-agnostic
-method names, so a later `HardwareRobotHAL` (real Raspberry Pi backend) can drop
-in with the same interface once real hardware exists. This is the seed of the
-abstraction described in AGENTS.md, not the robot-control logic itself.
+lidar, IMU, kicker/capacitor telemetry) and `SendCommand` (drive / dribble /
+kicker+capacitor switches) calls behind hardware-agnostic method names, so a
+later `HardwareRobotHAL` (real Raspberry Pi backend) can drop in with the same
+interface once real hardware exists. This is the seed of the abstraction
+described in AGENTS.md, not the robot-control logic itself.
 
 Usage:
     hal = SimRobotHAL()
@@ -15,6 +16,16 @@ Usage:
     pose  = hal.get_pose()              # (x, y, z, yaw) or None
     scan  = hal.get_lidar_scan()        # np.ndarray (N, 3) [angle, dist, intensity]
     hal.send_velocity(0.5, 0.0, 0.0)
+
+    # Kicker: charge, then fire, each with your own timing (see
+    # open_capacitor()/open_kicker() docstrings -- never open both at once).
+    hal.open_capacitor()
+    time.sleep(0.5)
+    hal.close_capacitor()
+    hal.open_kicker()
+    time.sleep(0.02)
+    hal.close_kicker()
+
     hal.close()
 """
 import os
@@ -98,18 +109,22 @@ class SimRobotHAL:
         self._sensor_thread = None
         self._command_thread = None
 
-        # Persistent command state: vx/vy/omega/kick_power/dribble_speed are
-        # independent control channels a real client drives concurrently (e.g.
-        # dribbling while approaching the ball). Each send_*/kick/dribble call
-        # below updates only its own field(s) and re-sends the *whole* current
-        # state, so e.g. calling send_velocity() doesn't silently reset an
-        # active dribble_speed back to 0 (RobotCommand's other fields would
-        # default to 0 if each call built a fresh message instead).
+        # Persistent command state: vx/vy/omega/dribble_speed/capacitor_open/
+        # kicker_open are independent control channels a real client drives
+        # concurrently (e.g. dribbling while approaching the ball, or charging
+        # the capacitor while driving into position). Each send_*/dribble/
+        # open_*/close_* call below updates only its own field(s) and
+        # re-sends the *whole* current state, so e.g. calling send_velocity()
+        # doesn't silently reset an active dribble_speed or open capacitor
+        # switch back to 0/False (RobotCommand's other fields would default
+        # to 0/False if each call built a fresh message instead).
         self._cmd_lock = threading.Lock()
         self._vx = 0.0
         self._vy = 0.0
         self._omega = 0.0
         self._dribble_speed = 0.0
+        self._capacitor_open = False
+        self._kicker_open = False
 
     # ---- lifecycle ----
 
@@ -204,11 +219,57 @@ class SimRobotHAL:
         return data.dribbler_rpm
 
     def get_capacitor_charge(self):
-        """Kicker capacitor charge level, 0.0 (empty) to 1.0 (full)."""
+        """Kicker capacitor charge level, 0.0 (empty) to 1.0 (full) --
+        capacitor_voltage / charge_voltage (see get_capacitor_voltage())."""
         data = self._latest_data()
         if data is None:
             return None
         return data.capacitor_charge
+
+    def get_capacitor_voltage(self):
+        """Kicker capacitor voltage in volts (0.0 up to /robot/capacitor/charge_voltage)."""
+        data = self._latest_data()
+        if data is None:
+            return None
+        return data.capacitor_voltage
+
+    def get_bus_voltage(self):
+        """Robot's current (sagged) power bus voltage in volts. Drops while
+        the capacitor is charging, and drops severely if open_capacitor()
+        and open_kicker() are both active at once (a real short circuit --
+        see open_kicker())."""
+        data = self._latest_data()
+        if data is None:
+            return None
+        return data.bus_voltage
+
+    def get_imu_orientation(self):
+        """Fused absolute orientation (roll, pitch, yaw) in radians, BNO055-
+        modeled: not integrated from the gyro, so yaw does not accumulate
+        drift the way raw gyro integration would (magnetometer-anchored
+        heading) -- only small, bounded per-sample noise. Mirrors the real
+        driver's getVector(VECTOR_EULER)."""
+        data = self._latest_data()
+        if data is None:
+            return None
+        return (data.imu_roll, data.imu_pitch, data.imu_yaw)
+
+    def get_imu_acceleration(self):
+        """Linear acceleration (x, y, z) in m/s^2, robot body frame, gravity
+        already removed -- mirrors the real driver's
+        getVector(VECTOR_LINEARACCEL)."""
+        data = self._latest_data()
+        if data is None:
+            return None
+        return (data.imu_accel_x, data.imu_accel_y, data.imu_accel_z)
+
+    def get_imu_angular_velocity(self):
+        """Angular velocity (x, y, z) in rad/s, robot body frame -- mirrors
+        the real driver's getVector(VECTOR_GYROSCOPE)."""
+        data = self._latest_data()
+        if data is None:
+            return None
+        return (data.imu_gyro_x, data.imu_gyro_y, data.imu_gyro_z)
 
     def get_lidar_scan(self):
         """Latest completed lidar scan as an (N, 3) ndarray [angle, distance,
@@ -228,34 +289,65 @@ class SimRobotHAL:
             self._vx, self._vy, self._omega = vx, vy, omega
             self._send_state_locked()
 
-    def kick(self, power):
-        """Request a kick at the given power (0.0-1.0).
-
-        kick_power is a one-shot trigger, not a persistent channel like
-        vx/vy/omega/dribble_speed: it rides along on this single command only,
-        so it isn't re-sent (and re-fired) by a later send_velocity()/dribble()
-        call.
-        """
-        with self._cmd_lock:
-            self._enqueue(simulator_pb2.RobotCommand(
-                robot_id=self._robot_id, vx=self._vx, vy=self._vy,
-                omega=self._omega, kick_power=power,
-                dribble_speed=self._dribble_speed))
-
     def dribble(self, speed):
         """Set dribbler speed (-1.0 to 1.0)."""
         with self._cmd_lock:
             self._dribble_speed = speed
             self._send_state_locked()
 
+    def open_capacitor(self):
+        """Close the charging switch: the boost converter starts pushing
+        current into the kicker capacitor through the charge-limiting
+        resistor. You control how long this stays open -- call
+        close_capacitor() yourself when you've charged enough (poll
+        get_capacitor_voltage()/get_capacitor_charge() to know when).
+
+        Opening this at the same time as open_kicker() is a real short
+        circuit (see open_kicker()) -- don't do both at once."""
+        with self._cmd_lock:
+            self._capacitor_open = True
+            self._send_state_locked()
+
+    def close_capacitor(self):
+        """Open the charging switch. The capacitor holds whatever charge it
+        has (slow leakage only)."""
+        with self._cmd_lock:
+            self._capacitor_open = False
+            self._send_state_locked()
+
+    def open_kicker(self):
+        """Close the discharge switch: the capacitor dumps into the solenoid
+        coil, driving the armature toward the ball. You control the fire
+        duration yourself -- call close_kicker() when done (a real strike
+        completes in a few milliseconds; holding this open longer than that
+        does nothing further once the capacitor is spent).
+
+        Opening this while open_capacitor() is also open is a real short
+        circuit: the discharge path bypasses the charge resistor's current
+        limiting, so the bus voltage collapses hard (see get_bus_voltage())
+        and the capacitor doesn't charge or fire coherently. This is exactly
+        what happens on real hardware if firmware mismanages the two gates --
+        the simulator doesn't prevent it, it simulates the consequence."""
+        with self._cmd_lock:
+            self._kicker_open = True
+            self._send_state_locked()
+
+    def close_kicker(self):
+        """Open the discharge switch."""
+        with self._cmd_lock:
+            self._kicker_open = False
+            self._send_state_locked()
+
     # ---- internals ----
 
     def _send_state_locked(self):
-        """Enqueue the current persistent vx/vy/omega/dribble_speed state.
-        Caller must hold self._cmd_lock."""
+        """Enqueue the current persistent vx/vy/omega/dribble_speed/
+        capacitor_open/kicker_open state. Caller must hold self._cmd_lock."""
         self._enqueue(simulator_pb2.RobotCommand(
             robot_id=self._robot_id, vx=self._vx, vy=self._vy,
-            omega=self._omega, dribble_speed=self._dribble_speed))
+            omega=self._omega, dribble_speed=self._dribble_speed,
+            capacitor_charge_open=self._capacitor_open,
+            kicker_open=self._kicker_open))
 
     def _enqueue(self, cmd):
         if self._closed:

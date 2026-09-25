@@ -665,6 +665,145 @@ the theoretical 0.0667 N default rather than chasing (a), since going lower demo
 move the threshold in testing. If a precise 0.3 m/s figure genuinely matters for gameplay, (b) is
 the parameter to revisit next, with the user's explicit sign-off given its broader blast radius.
 
+## Electrical rewrite: real capacitor/coil/armature simulation, client-timed switches
+
+Follow-up request (2026-09-25): replace the `kick_power = [0,1]` one-shot request model with a real
+electrical simulation matching how the actual hardware works. This directly reverses "What the
+simulator does NOT need to replicate" from the top of this doc (BLDC/capacitor/PWM electrical
+detail) — that was the right call for the *dribbler* motor, which stays untouched, but the user now
+wants the *kicker's* capacitor/coil/armature chain modeled for real, because real firmware controls
+it as four independent operations and needs the simulator to behave like the real circuit under all
+four, including misuse:
+
+- `open_capacitor()`/`close_capacitor()` — charging switch. The client decides how long to hold it
+  closed; the simulator computes the resulting capacitor voltage from an RC charge model, not a
+  fixed `charge_time`.
+- `open_kicker()`/`close_kicker()` — discharge switch. The client decides how long to hold it
+  closed; the simulator computes coil current, solenoid force, and armature motion from that,
+  and the ball only gets hit if/when the armature's simulated stroke actually reaches it.
+- The debug `F` key still exists but is now explicitly a bypass: `Kicker::debugFire()` applies a
+  fixed impulse (`/robot/kicker/debug_impulse`) and never touches capacitor/coil state at all,
+  matching "F always hits regardless of charge, conденсатор не используется."
+- Opening both switches at once is a real short circuit and must severely sag the bus voltage, "как
+  будто я сделал это в реальной жизни."
+
+### Circuit model
+
+Three linked subsystems, `Kicker::update()` (`kicker.cpp`):
+
+1. **Battery/bus** — purely resistive source, no separate dynamics: `bus_voltage = working_voltage
+   - I_bus * internal_resistance`, recomputed every frame from whatever current is being drawn
+   that frame (`/robot/battery/working_voltage` = 16V, `/robot/battery/internal_resistance` =
+   0.05Ω by default). Relaxes back to `working_voltage` immediately once nothing is drawing current
+   — a real battery's terminal voltage recovery is fast enough relative to this sim's timescale
+   that a separate RC model for the battery itself wasn't judged worth the complexity the capacitor
+   genuinely needs (the capacitor has to remember charge across frames; the battery doesn't need to
+   remember *sag* across frames, only *load*).
+2. **Capacitor + charging path** (`/robot/capacitor/*`) — boost converter (regulated to
+   `charge_voltage` = 48V, current-limited to `boost_max_current`) → `charge_resistance` (2Ω
+   default, limits inrush) → capacitor (`capacitance_uf` = 20000µF, matching the "~20000 µF at ~48V"
+   figure this doc already quoted from the real hardware description at the top). Solved with the
+   *exact* exponential RC solution (`Vc_new = Vtarget - (Vtarget - Vc_old) * exp(-dt/tau)`), not an
+   explicit Euler step — unconditionally stable regardless of `dt`, avoiding the exact class of
+   deadbeat/small-`dt`-only-correct bug this project has been bitten by before (see the third
+   revision above, "`posErr / dt` was a bug in its own right"). If the boost converter's own current
+   limit would be exceeded by the ideal RC curve, the charge step is capped instead — charging
+   genuinely takes longer under a current-limited converter than the unconstrained curve predicts,
+   a real effect kept rather than simplified away. Passive leakage (`leakage_resistance` = 1MΩ) always
+   applies, charging or not, so an idle capacitor slowly self-discharges like a real one.
+3. **Coil + armature (discharge)** — capacitor → `coil_resistance` + `esr` in series, `coil_inductance`
+   → armature (mass `armature_mass`, spring `spring_constant`, damping `damping_coefficient`,
+   travel `stroke`). Solenoid force = `force_constant * I²` (standard solenoid force-current
+   relationship — force is not modeled as a function of armature position, i.e. no position-
+   dependent inductance/reluctance curve, which would need real magnetic-circuit data this project
+   doesn't have; documented as a known simplification, not silently assumed away). Because the
+   coil's `L/R` time constant (~1ms with the default values) is far faster than a physics frame
+   (`dt` ~4-16ms depending on `/physics/timestep` vs. render rate), `Kicker::update()` sub-steps
+   this ODE internally at a fixed target resolution (`m_electricalSubstepDt` = 50µs, capped at
+   `m_maxSubsteps` = 400 substeps/frame) rather than integrating once per frame at the coarse `dt` —
+   a single-step-per-frame Euler integration of an oscillatory RLC/spring system at 4-16ms would be
+   wildly unstable (this is the same "match the integrator to the real time constant" lesson as
+   item 2, applied to a faster subsystem). Uses **symplectic (semi-implicit) Euler** — current
+   advanced from the *old* capacitor voltage, then capacitor voltage advanced from the *new*
+   current — the standard trick for keeping an oscillatory system numerically stable at a fixed
+   step size without the energy gain plain explicit Euler would visibly produce over hundreds of
+   substeps. Once the capacitor is spent, coil current is clamped at 0 rather than allowed to drive
+   the capacitor negative — a documented flyback-diode assumption (real solenoid drivers protect
+   against exactly this reverse-current case).
+
+### Armature → ball impact
+
+The armature's simulated position (`m_armaturePos`, 0 = retracted, `stroke` = fully extended) is
+integrated every substep from the solenoid/spring/damping forces. The instant it first reaches
+`stroke` on a given firing (tracked by `m_hasFiredThisStroke`, reset once the armature has fully
+retracted), its velocity at that moment is used for a one-off 1D collision-with-restitution against
+the ball (assumed at rest along the strike axis on the kick's millisecond timescale — a fair
+approximation given how short the event is): `v_ball = (1+e) * (m_armature / (m_armature +
+m_ball)) * v_armature`. Same range check and chip-angle tilt as the pre-rewrite model (factored into
+the shared `Kicker::applyKickImpulse` helper, also used by `debugFire`) — a flat plunger's contact
+normal is horizontal regardless of contact height, so negative `height_offset` still needs its own
+angle term to chip at all; see the git history of `kicker.cpp` for the original derivation if this
+needs revisiting.
+
+Holding `open_kicker()` open longer than the mechanical event takes does nothing further — the
+capacitor is already spent and the coil current has decayed to ~0, so there's no more force to
+apply. Calling `close_kicker()` mid-stroke cuts the coil's drive voltage; the armature's own spring
+then pulls it back to rest over the following frames with no separate "retract" code path, since
+the same substep ODE (with the drive voltage removed) already accounts for the spring term.
+
+### Short circuit (both switches open at once)
+
+Modeled directly via a dedicated `short_circuit_resistance` (0.1Ω default) fault path rather than
+re-deriving the exact parallel charge/discharge topology, which isn't precisely known: the coil's
+resistance is much lower than the charge path's current-limiting resistor, so current preferentially
+takes the low-impedance discharge route instead of charging the capacitor coherently. While both
+switches are open, `Kicker::update()` takes a separate branch: Ohm's law across
+`battery_internal_resistance + short_circuit_resistance` gives the fault current, deliberately
+**not** clamped by `boost_max_current` the way normal charging is — `boost_max_current` models the
+boost converter's own regulated current limit, which a real cheap boost module's protection can't
+be trusted to actually enforce against a genuine downstream short (that's the whole reason this is
+a *fault* branch and not just "charging slower"); applying the same clamp here would silently cap
+the sag at whatever mild level normal charging already produces, defeating the point. A share of
+that fault current (current-divided against the coil's own resistance) still reaches the coil, so a
+real robot's kick under this fault comes out weak/erratic rather than silently doing nothing — but
+the normal RC charge and RLC discharge models don't advance at all during the fault, since this
+whole path is a documented approximation of "current doesn't behave coherently when both gates are
+shorted together," not a precise circuit solve. Verified via an isolated gRPC test script
+(2026-09-25, not committed): default config sags `bus_voltage` from 16.0V to ~10.7V (33%) for as
+long as both switches stay open, recovering to 16.0V within one frame of either closing — a clearly
+"severe" brownout, reproducing the requested symptom without pretending to know the real board's
+exact trace/component topology.
+
+### Proto / SensorData
+
+`capacitor_charge` (0..1, unchanged field number) is now `capacitor_voltage / charge_voltage`
+instead of a linear `charge_time`-based ramp. Two new fields expose the underlying electrical state
+directly: `bus_voltage` and `capacitor_voltage` (both volts) — see `simulator.proto`.
+`RobotCommand.kick_power` is `reserved` (not reused — an old client sending it is silently ignored,
+not misinterpreted); replaced by `capacitor_charge_open`/`kicker_open`, both persistent state like
+`dribble_speed`. `SimRobotHAL.kick()` is removed; replaced by `open_capacitor()`/`close_capacitor()`/
+`open_kicker()`/`close_kicker()` plus `get_bus_voltage()`/`get_capacitor_voltage()`.
+
+### Known simplifications, stated honestly
+
+- No position-dependent solenoid force curve (force = `k * I²` only, no reluctance-vs-position
+  term real solenoids have) — would need real magnetic-circuit data this project doesn't have.
+- Ball assumed at rest along the strike axis at the moment of impact (true 1D collision, not a full
+  3D contact solve) — reasonable given the kick's millisecond timescale, but doesn't account for a
+  ball already moving fast in an unrelated direction at contact time.
+- The short-circuit fault path is a lumped approximation (one fault resistance), not a solved dual-
+  source circuit — see the "Short circuit" section above for why.
+- Component values (`coil_resistance`, `coil_inductance`, `force_constant`, `armature_mass`,
+  `spring_constant`, etc.) are physically-reasonable defaults, not measured from real hardware — the
+  real board's exact component values weren't available. Every one of them is a plain config key
+  (`/robot/battery`, `/robot/capacitor`, `/robot/kicker`) specifically so they can be corrected
+  without touching code once real values are known. `force_constant`/`armature_mass`/`stroke` were
+  picked so a full-charge kick lands in a plausible ballpark (a few m/s ball exit speed, not the
+  ~30 m/s a naive full-energy-conservation estimate would suggest — real solenoids convert only a
+  small fraction of stored electrical energy into armature kinetic energy, the rest dissipating in
+  coil resistance and mechanical losses) — re-tune via `force_constant` first if kick strength needs
+  adjusting, it's the single most direct lever.
+
 ## Docs to update when done
 
 - `AGENTS.md`: add `Dribbler`/`Kicker` to the class-responsibilities list (same style as the

@@ -20,8 +20,9 @@ grpc::Status SimulatorServiceImpl::SendCommand(
         m_state.vx = cmd.vx();
         m_state.vy = cmd.vy();
         m_state.omega = cmd.omega();
-        m_state.kickPower = cmd.kick_power();
         m_state.dribbleSpeed = cmd.dribble_speed();
+        m_state.capacitorChargeOpen = cmd.capacitor_charge_open();
+        m_state.kickerOpen = cmd.kicker_open();
     }
 
     // Deliberately NOT resetting vx/vy/omega/dribble_speed when the client
@@ -75,6 +76,17 @@ grpc::Status SimulatorServiceImpl::SensorStream(
             data.set_ball_pos_z(m_state.ballPosition.z);
             data.set_dribbler_rpm(m_state.dribblerRpm);
             data.set_capacitor_charge(m_state.capacitorCharge);
+            data.set_bus_voltage(m_state.busVoltage);
+            data.set_capacitor_voltage(m_state.capacitorVoltage);
+            data.set_imu_roll(m_state.imuRoll);
+            data.set_imu_pitch(m_state.imuPitch);
+            data.set_imu_yaw(m_state.imuYaw);
+            data.set_imu_accel_x(m_state.imuAccel.x);
+            data.set_imu_accel_y(m_state.imuAccel.y);
+            data.set_imu_accel_z(m_state.imuAccel.z);
+            data.set_imu_gyro_x(m_state.imuGyro.x);
+            data.set_imu_gyro_y(m_state.imuGyro.y);
+            data.set_imu_gyro_z(m_state.imuGyro.z);
             for (const LidarPoint& p : m_state.lidarPoints) {
                 robocup::LidarPoint* lp = data.add_lidar_points();
                 lp->set_angle(p.angle);

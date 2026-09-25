@@ -14,6 +14,7 @@ class Camera;
 class LidarSensor;
 class Dribbler;
 class Kicker;
+class ImuSensor;
 class GrpcServer;
 class DebugOverlay;
 
@@ -55,6 +56,7 @@ private:
     std::unique_ptr<LidarSensor> m_lidar;
     std::unique_ptr<Dribbler> m_dribbler;
     std::unique_ptr<Kicker> m_kicker;
+    std::unique_ptr<ImuSensor> m_imu;
     std::unique_ptr<GrpcServer> m_grpc;
     std::unique_ptr<DebugOverlay> m_debugOverlay;
 
@@ -106,8 +108,9 @@ private:
     float m_lastManualStrafe = 0.0f;
     float m_lastManualTurn   = 0.0f;
 
-    // Manual dribbler/kicker (Space = dribble while held, F = kick on press).
-    // Same "only on change" rationale as the drive keys above.
+    // Manual dribbler/kicker (Space = dribble while held, F = debug-fire on
+    // press -- fixed impulse, bypasses the capacitor entirely, see Kicker::
+    // debugFire). Same "only on change" rationale as the drive keys above.
     bool m_lastManualDribbleHeld = false;
     bool m_lastManualKickHeld    = false;
 };

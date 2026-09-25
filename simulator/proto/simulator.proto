@@ -54,8 +54,43 @@ message SensorData {
     // as dribble_speed (positive = capture direction).
     float dribbler_rpm = 19;
 
-    // Kicker capacitor charge level, 0.0 (empty) to 1.0 (full).
+    // Kicker capacitor charge level, 0.0 (empty) to 1.0 (full) --
+    // capacitor_voltage / /robot/capacitor/charge_voltage. See
+    // docs/tasks/dribbler-kicker.md's "Electrical rewrite" section for the
+    // full circuit model behind these three fields.
     float capacitor_charge = 20;
+
+    // Actual robot bus voltage (V), sagged from /robot/battery/working_voltage
+    // by whatever current the capacitor charging path (and, during a
+    // charge+fire short circuit, the kicker coil) is currently drawing.
+    float bus_voltage = 21;
+
+    // Actual kicker capacitor voltage (V), 0 (empty) to
+    // /robot/capacitor/charge_voltage (full).
+    float capacitor_voltage = 22;
+
+    // BNO055-modeled IMU. Fused absolute orientation (roll/pitch/yaw, radians)
+    // -- NOT raw gyro integration, so yaw does not accumulate drift the way a
+    // pure gyroscope would (magnetometer-anchored heading, per the real
+    // sensor's NDOF fusion mode); small per-sample noise only. The robot's
+    // own chassis never tips (see Robot's yaw-only angular factor), so
+    // imu_roll/imu_pitch are always ~0 + noise, matching what the real sensor
+    // would read mounted flat on a robot that never leaves the ground.
+    float imu_roll = 23;
+    float imu_pitch = 24;
+    float imu_yaw = 25;
+
+    // Linear acceleration, body frame (m/s^2), gravity already removed --
+    // matches the real BNO055's VECTOR_LINEARACCEL output, not raw
+    // accelerometer/proper-acceleration. See docs/tasks/imu-sensor.md.
+    float imu_accel_x = 26; // body +X (forward)
+    float imu_accel_y = 27; // body +Y (up)
+    float imu_accel_z = 28; // body +Z (lateral)
+
+    // Angular velocity, body frame (rad/s) -- matches VECTOR_GYROSCOPE.
+    float imu_gyro_x = 29;
+    float imu_gyro_y = 30; // yaw rate; matches angular_velocity above (noisy)
+    float imu_gyro_z = 31;
 }
 
 message LidarPoint {
@@ -73,11 +108,13 @@ message RobotCommand {
     float vy = 3;
     float omega = 4;
 
-    // Kicker: a power *request* in [0.0, 1.0]. The impulse actually delivered is
-    // min(kick_power, capacitor_charge) * max_power — firing drains the
-    // capacitor, which recharges over /robot/kicker/charge_time, so a kick
-    // requested before recharge completes is measurably weaker.
-    float kick_power = 5;
+    // Removed: the old one-shot kick_power=[0,1] request model. Superseded by
+    // capacitor_charge_open/kicker_open below -- see docs/tasks/
+    // dribbler-kicker.md's "Electrical rewrite" section. Field number kept
+    // reserved rather than reused (proto3 hygiene: an old client sending this
+    // field to a new server is simply ignored, not misinterpreted).
+    reserved 5;
+    reserved "kick_power";
 
     // Dribbler: roller speed command in [-1.0, 1.0]. Positive = capture
     // direction (the roller surface at the ball contact point moves toward the
@@ -86,6 +123,22 @@ message RobotCommand {
     float dribble_speed = 6;
 
     double timestamp = 7;
+
+    // Kicker power switches -- both are persistent state (like dribble_speed
+    // above), held open/closed for exactly as long as the client wants, same
+    // as the real hardware's two independent MOSFET gates:
+    //  - capacitor_charge_open: charging path closed (boost converter ->
+    //    charge_resistance -> capacitor). Client controls charge duration
+    //    itself by calling open_capacitor()/close_capacitor() (SimRobotHAL).
+    //  - kicker_open: discharge path closed (capacitor -> solenoid coil).
+    //    Client controls fire duration itself via open_kicker()/close_kicker().
+    // Opening both at once is a real short circuit (the discharge path
+    // bypasses charge_resistance's current limiting) and severely sags
+    // bus_voltage -- see Kicker::update in kicker.cpp. This is what real
+    // firmware must avoid; the simulator does not prevent it, it simulates
+    // the consequence.
+    bool capacitor_charge_open = 8;
+    bool kicker_open = 9;
 }
 
 message CommandResponse {
