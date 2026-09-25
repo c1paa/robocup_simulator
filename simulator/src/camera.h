@@ -42,8 +42,12 @@ private:
     int m_width  = 640;
     int m_height = 480;
     float m_fov  = 120.0f;
-    float m_noiseStd = 0.02f;
-    float m_pixelNoise = 0.01f;
+    // noise_std and pixel_noise are two independent zero-mean per-channel
+    // Gaussian noise sources added together; summed independent Gaussians
+    // are themselves Gaussian with variance = sum of variances, so they're
+    // combined into a single std at load time instead of drawing (and
+    // costing) two random samples per byte at render time.
+    float m_combinedNoiseStd = 0.0223f;
     int m_cubemapRes = 256;
     float m_streamFps = 30.0f;
     glm::vec3 m_background = glm::vec3(0.0f);
@@ -88,7 +92,8 @@ private:
     void initPreview();
     void captureCubemap(const glm::vec3& worldViewpoint,
                         const std::function<void(Renderer&)>& drawScene);
+    // Noise (see m_combinedNoiseStd) is applied inside the compositing
+    // fragment shader, not as a CPU post-process -- see camera.cpp.
     void composite(float robotYaw);
     void readback();
-    void applyNoise();
 };

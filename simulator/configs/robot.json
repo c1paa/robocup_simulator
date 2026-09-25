@@ -15,13 +15,13 @@
             "moment_of_inertia_z": null
         },
         "mirror": {
-            "type": "cone",
+            "type": "profile",
             "base_height": 150,
             "base_diameter": 170,
             "cone_height": 40,
             "hyperbola_a": 35,
             "hyperbola_b": 40,
-            "profile_csv": "mirrors/example_hyperbola.csv"
+            "profile_csv": "mirrors/mirror_profile.csv"
         },
         "camera": {
             "height": 90
@@ -77,12 +77,12 @@
         }
     },
     "camera": {
-        "width": 640,
-        "height": 480,
-        "fov": 120.0,
+        "width": 1536,
+        "height": 864,
+        "fov": 99.1,
         "noise_std": 0.02,
         "pixel_noise": 0.01,
         "cubemap_resolution": 256,
-        "stream_fps": 30
+        "stream_fps": 120
     }
 }

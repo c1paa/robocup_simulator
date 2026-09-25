@@ -70,24 +70,55 @@ uniform sampler2D uLut;
 uniform samplerCube uCubemap;
 uniform float uYaw;
 uniform vec3 uBackground;
+uniform float uNoiseStd; // combined noise_std/pixel_noise, see Camera::init
+uniform float uNoiseSeed; // one draw per frame (CPU), decorrelates noise over time
+
+// Cheap per-pixel pseudo-random hash -> [0,1). Not cryptographic, just
+// decorrelated enough for sensor-noise purposes; replaces what used to be
+// a std::mt19937 + std::normal_distribution draw per output byte on the
+// CPU (see the removed Camera::applyNoise), which didn't scale to this
+// project's higher target resolutions/frame rates.
+float hash(vec2 p)
+{
+    p = fract(p * vec2(443.8975, 441.4234));
+    p += dot(p, p.yx + 19.19);
+    return fract((p.x + p.y) * p.x);
+}
+
+// Box-Muller: two uniform hashes -> one standard-normal sample.
+float gauss(vec2 p)
+{
+    float u1 = max(hash(p), 1e-6);
+    float u2 = hash(p + 17.0);
+    return sqrt(-2.0 * log(u1)) * cos(6.2831853 * u2);
+}
 
 void main()
 {
+    vec3 color;
     vec4 lut = texture(uLut, vUV);
     if (lut.a < 0.5) {
-        FragColor = vec4(uBackground, 1.0);
-        return;
+        color = uBackground;
+    } else {
+        vec3 d = lut.rgb;
+        float c = cos(uYaw);
+        float s = sin(uYaw);
+        vec3 wd;
+        wd.x = c * d.x + s * d.z;
+        wd.y = d.y;
+        wd.z = -s * d.x + c * d.z;
+        color = texture(uCubemap, wd).rgb;
     }
 
-    vec3 d = lut.rgb;
-    float c = cos(uYaw);
-    float s = sin(uYaw);
-    vec3 wd;
-    wd.x = c * d.x + s * d.z;
-    wd.y = d.y;
-    wd.z = -s * d.x + c * d.z;
+    // Independent per-channel noise, offset in the hash input so R/G/B
+    // don't share a sample (matches the old per-byte CPU behaviour).
+    vec3 noise = vec3(
+        gauss(vUV * 1.0 + uNoiseSeed),
+        gauss(vUV * 2.0 + uNoiseSeed),
+        gauss(vUV * 3.0 + uNoiseSeed)
+    ) * uNoiseStd;
 
-    FragColor = vec4(texture(uCubemap, wd).rgb, 1.0);
+    FragColor = vec4(clamp(color + noise, 0.0, 1.0), 1.0);
 }
 )GLSL";
 
@@ -111,8 +142,9 @@ void Camera::init(Config& cfg, const MirrorProfile& mirror, float cameraHeight, 
     m_width  = cfg.getInt("/camera/width",  640);
     m_height = cfg.getInt("/camera/height", 480);
     m_fov    = cfg.getFloat("/camera/fov",  120.0f);
-    m_noiseStd   = cfg.getFloat("/camera/noise_std",   0.02f);
-    m_pixelNoise = cfg.getFloat("/camera/pixel_noise", 0.01f);
+    float noiseStd   = cfg.getFloat("/camera/noise_std",   0.02f);
+    float pixelNoise = cfg.getFloat("/camera/pixel_noise", 0.01f);
+    m_combinedNoiseStd = std::sqrt(noiseStd * noiseStd + pixelNoise * pixelNoise);
     m_cubemapRes = cfg.getInt("/camera/cubemap_resolution", 256);
     m_streamFps  = cfg.getFloat("/camera/stream_fps", 30.0f);
     m_background.r = cfg.getFloat("/camera/background_color/0", 0.0f);
@@ -348,7 +380,6 @@ void Camera::renderView(const glm::vec3& robotPos, float robotYaw,
     captureCubemap(vpWorld, drawScene);
     composite(robotYaw);
     readback();
-    applyNoise();
 }
 
 void Camera::captureCubemap(const glm::vec3& vp,
@@ -401,6 +432,9 @@ void Camera::composite(float robotYaw)
     glUniform1f(glGetUniformLocation(m_compositeProgram, "uYaw"), robotYaw);
     glUniform3f(glGetUniformLocation(m_compositeProgram, "uBackground"),
                 m_background.r, m_background.g, m_background.b);
+    glUniform1f(glGetUniformLocation(m_compositeProgram, "uNoiseStd"), m_combinedNoiseStd);
+    std::uniform_real_distribution<float> seedDist(0.0f, 1000.0f);
+    glUniform1f(glGetUniformLocation(m_compositeProgram, "uNoiseSeed"), seedDist(m_rng));
 
     glBindVertexArray(m_quadVao);
     glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, nullptr);
@@ -432,16 +466,6 @@ void Camera::readback()
         std::memcpy(row.data(), top, rowBytes);
         std::memcpy(top, bot, rowBytes);
         std::memcpy(bot, row.data(), rowBytes);
-    }
-}
-
-void Camera::applyNoise()
-{
-    std::normal_distribution<float> dist(0.0f, 1.0f);
-    for (size_t i = 0; i < m_imageData.size(); i++) {
-        float n = dist(m_rng) * m_noiseStd + dist(m_rng) * m_pixelNoise;
-        float v = (float)m_imageData[i] / 255.0f + n;
-        m_imageData[i] = (uint8_t)std::clamp((int)std::lround(v * 255.0f), 0, 255);
     }
 }
 
