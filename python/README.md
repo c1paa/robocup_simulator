@@ -6,9 +6,11 @@ commands. Everything goes over gRPC (`simulator/proto/simulator.proto`) on `loca
 already be running (`./run_simulator.sh`).
 
 You do not need to touch gRPC or the generated protobuf code directly. `robot_hal.py` wraps all of
-it behind one class, `SimRobotHAL`, with plain method calls and Python-native types (floats,
-tuples, numpy arrays). This is the intended integration point for your control code — see
-"Why a HAL, not raw gRPC" below for why it's shaped this way.
+it behind two classes: `SimulatorClient`, for the one thing that isn't scoped to a robot that
+already exists (adding one — see `add_robot()` below), and `SimRobotHAL`, for everything else
+(driving, sensors, kicker, IMU, ...) once you have a `robot_id`. Plain method calls, Python-native
+types (floats, tuples, numpy arrays). This is the intended integration point for your control
+code — see "Why a HAL, not raw gRPC" below for why it's shaped this way.
 
 ## Using this from your own project (recommended)
 
@@ -34,9 +36,15 @@ Then, from any file under `src/` (or anywhere else in your project — no relati
 `sys.path` editing):
 
 ```python
-from robot_hal import SimRobotHAL
+from robot_hal import SimRobotHAL, SimulatorClient
 
-hal = SimRobotHAL()
+# Add a robot at runtime (no need to launch the simulator with --robot flags
+# first -- run it with --empty if you don't want its default single robot).
+sim = SimulatorClient()
+robot_id = sim.add_robot("robocup_simulator/simulator/configs/robot.json")
+sim.close()
+
+hal = SimRobotHAL(robot_id=robot_id)
 hal.connect()
 hal.send_velocity(0.5, 0.0, 0.0)
 ```
@@ -92,11 +100,19 @@ construction.
 
 ## API reference
 
-### Lifecycle
+### Adding robots (`SimulatorClient`)
 
 | Method | Description |
 |---|---|
-| `SimRobotHAL(host="localhost", port=50051, robot_id=0)` | Construct the client. `robot_id` lets multiple robots share one simulator once multi-robot support lands (see `ROADMAP.md` item 6) — today there is exactly one robot, always `robot_id=0`. |
+| `SimulatorClient(host="localhost", port=50051)` | Construct the client. Doesn't block or start any background threads — it's a thin wrapper over one unary RPC. |
+| `add_robot(config_path, spawn_x=0.0, spawn_z=0.0, spawn_yaw_deg=0.0, timeout=15.0)` | Adds a new robot to the field and returns its `robot_id`. `config_path` is resolved **on the machine running the simulator** (server-side filesystem), relative to the simulator process's own working directory — same convention as `main.cpp`'s `--robot` flag, not relative to this script. Works whether the simulator was launched with a default robot, `--robot` flags, or `--empty`; robots can be added any time, including while other robots are already connected and driving. Blocks until the robot actually exists (so a `SimRobotHAL(robot_id=...)` right after this succeeding will find it). Raises `RuntimeError` if the simulator rejects it (e.g. a bad `config_path`) — this does not crash or otherwise affect the simulator or any other robot. |
+| `close()` | Releases the channel. Optional if you're about to open `SimRobotHAL` connections in the same process anyway. |
+
+### Lifecycle (`SimRobotHAL`)
+
+| Method | Description |
+|---|---|
+| `SimRobotHAL(host="localhost", port=50051, robot_id=0)` | Construct the client for one specific robot already on the field (see `SimulatorClient.add_robot()` above, or the simulator's own `--robot` flags / default robot — see `docs/tasks/multi-robot.md`). `robot_id` picks which one this client talks to. Each id has its own independent command/sensor buffer, so several `SimRobotHAL` instances (different `robot_id`, same host/port) never interfere with each other. |
 | `connect(timeout=15.0)` | Starts two background daemon threads (one reading the `SensorStream`, one draining a command queue into `SendCommand`) and **blocks** until the simulator is actually ready: the gRPC channel is up and the first `SensorData` message has arrived, printing progress to the console while it waits. Raises `RuntimeError` if `timeout` seconds pass first. Idempotent — safe to call once, ignored on repeat calls. Because it blocks until data has actually arrived, you don't need to poll `get_pose()` in a loop afterward — it's safe to call sensor/command methods immediately after `connect()` returns. |
 | `close()` | Stops both background threads and closes the gRPC channel. Call this when your control loop exits. |
 
@@ -161,3 +177,23 @@ position X,Z"), rotate your world-frame velocity into body frame using the curre
   rarely run this by hand — it's there mainly for explicitly forcing a regeneration.
 - `pyproject.toml` — makes `python/` installable with `pip install -e .` (see "Using this from your
   own project" above). `robot_hal` is a flat module, not a package, so nothing else here changes.
+
+## Starting the simulator from Python
+
+No manual `./run_simulator.sh` needed:
+
+```python
+from robot_hal import Simulator, create_robot
+
+sim = Simulator().start()        # opens the window (builds it first if needed)
+robot = create_robot(sim)        # adds a robot, returns a connected SimRobotHAL
+robot.send_velocity(0.3, 0, 0)
+sim.stop()                       # closes the window
+```
+
+`Simulator` is also a context manager (`with Simulator() as sim:`). Set
+`ROBOT_BACKEND=hw` (or comment out the `Simulator` lines) to get a
+`HardwareRobotHAL` instead -- currently a stub that raises
+`NotImplementedError`. Code written against `RobotHAL` runs on either backend;
+`get_pose()` / `get_ball_position()` are simulator ground truth and exist on
+`SimRobotHAL` only. See `examples/main.py`.

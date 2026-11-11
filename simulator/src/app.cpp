@@ -32,7 +32,6 @@ bool App::init(const std::string& configDir)
 
     try {
         cfg.loadProject(configDir + "project.json");
-        cfg.loadRobot(configDir + "robot.json");
     } catch (const std::exception& e) {
         std::cerr << "[Config] Warning: " << e.what() << ". Using defaults." << std::endl;
     }
@@ -55,26 +54,13 @@ bool App::init(const std::string& configDir)
     m_renderer = std::make_unique<Renderer>();
     m_physics  = std::make_unique<Physics>();
     m_field    = std::make_unique<Field>();
-    m_robot    = std::make_unique<Robot>();
     m_ball     = std::make_unique<Ball>();
-    m_camera   = std::make_unique<Camera>();
-    m_lidar    = std::make_unique<LidarSensor>();
-    m_dribbler = std::make_unique<Dribbler>();
-    m_kicker   = std::make_unique<Kicker>();
-    m_imu      = std::make_unique<ImuSensor>();
     m_grpc     = std::make_unique<GrpcServer>();
     m_debugOverlay = std::make_unique<DebugOverlay>();
 
     m_physics->init(cfg);
     m_field->init(cfg);
-    m_robot->init(cfg, m_physics->world());
     m_ball->init(cfg, m_physics->world());
-    m_camera->init(cfg, m_robot->mirrorProfile(), m_robot->cameraHeight(), m_renderer.get());
-    m_lidar->init(cfg, m_physics->world());
-    m_dribbler->init(cfg);
-    m_kicker->init(cfg);
-    m_kicker->setActors(m_robot.get(), m_ball.get());
-    m_imu->init(cfg);
     m_debugOverlay->init();
     m_renderer->init(m_width, m_height);
     m_renderer->setLighting(
@@ -87,23 +73,84 @@ bool App::init(const std::string& configDir)
         glm::vec3(cfg.getFloat("/scene/light/diffuse/0", 0.85f),
                   cfg.getFloat("/scene/light/diffuse/1", 0.83f),
                   cfg.getFloat("/scene/light/diffuse/2", 0.78f)));
-    m_grpc->setRobot(m_robot.get());
-    m_grpc->setCamera(m_camera.get());
-    m_grpc->setLidar(m_lidar.get());
-    m_grpc->setBall(m_ball.get());
-    m_grpc->setDribbler(m_dribbler.get());
-    m_grpc->setKicker(m_kicker.get());
-    m_grpc->setImu(m_imu.get());
-    m_grpc->start();
 
-    std::cout << "[App] Simulator ready." << std::endl;
+    // The field itself (walls/ball/lighting) is ready; no robot exists yet --
+    // see addRobot(). GrpcServer exists so addRobot() can register robots
+    // into it as they're created, but it doesn't start serving until run()
+    // (once the caller's whole team is registered).
+    m_grpc->setBall(m_ball.get());
+
+    // Lets a client's gRPC AddRobot call actually create a robot at runtime
+    // (once the sim loop is running) instead of only "in code" before
+    // run() -- GrpcServer::update() calls this on the sim/main thread when
+    // it drains a queued request. See docs/tasks/multi-robot.md's "Dynamic
+    // robot creation" section.
+    m_grpc->setAddRobotHandler([this](const std::string& path, float x, float z, float yawDeg) {
+        return addRobot(path, x, z, yawDeg);
+    });
+
+    std::cout << "[App] Simulator ready (field empty -- call addRobot() to add robots)." << std::endl;
     return true;
+}
+
+int App::addRobot(const std::string& robotConfigPath, float spawnX, float spawnZ, float spawnYawDeg)
+{
+    if (!m_physics || !m_renderer || !m_ball || !m_grpc) {
+        std::cerr << "[App] addRobot() called before init()." << std::endl;
+        return -1;
+    }
+
+    int id = (int)m_robots.size();
+
+    RobotEntry entry;
+    entry.id = id;
+    try {
+        entry.config = Config::instance().withRobotOverlay(robotConfigPath);
+    } catch (const std::exception& e) {
+        // loadRobot throws on a missing/unreadable file. A bad path from
+        // main.cpp's --robot would previously just abort at startup (an
+        // acceptable crash for a typo in a one-shot CLI arg), but this same
+        // path now also runs mid-session from a gRPC AddRobot handler (see
+        // App::init's setAddRobotHandler) -- there, letting the exception
+        // propagate would crash the whole simulator (and every other
+        // robot's session) over one bad client request. Report it back to
+        // that one caller instead.
+        std::cerr << "[App] addRobot(\"" << robotConfigPath << "\") failed: " << e.what() << std::endl;
+        return -1;
+    }
+    if (spawnX != 0.0f || spawnZ != 0.0f || spawnYawDeg != 0.0f) {
+        entry.config.setRobotSpawn(spawnX, spawnZ, spawnYawDeg);
+    }
+
+    entry.robot    = std::make_unique<Robot>();
+    entry.camera   = std::make_unique<Camera>();
+    entry.lidar    = std::make_unique<LidarSensor>();
+    entry.dribbler = std::make_unique<Dribbler>();
+    entry.kicker   = std::make_unique<Kicker>();
+    entry.imu      = std::make_unique<ImuSensor>();
+
+    entry.robot->init(entry.config, m_physics->world());
+    entry.camera->init(entry.config, entry.robot->mirrorProfile(), entry.robot->cameraHeight(), m_renderer.get());
+    entry.lidar->init(entry.config, m_physics->world());
+    entry.dribbler->init(entry.config);
+    entry.kicker->init(entry.config);
+    entry.kicker->setActors(entry.robot.get(), m_ball.get());
+    entry.imu->init(entry.config);
+
+    m_grpc->registerRobot(id, entry.robot.get(), entry.camera.get(), entry.lidar.get(),
+                           entry.dribbler.get(), entry.kicker.get(), entry.imu.get());
+
+    m_robots.push_back(std::move(entry));
+    std::cout << "[App] Robot " << id << " added from " << robotConfigPath << std::endl;
+    return id;
 }
 
 void App::shutdown()
 {
     if (m_grpc)         m_grpc->stop();
-    if (m_camera)       m_camera->shutdown();
+    for (auto& entry : m_robots) {
+        if (entry.camera) entry.camera->shutdown();
+    }
     if (m_debugOverlay) m_debugOverlay->shutdown();
     if (m_renderer)     m_renderer->shutdown();
     if (m_glContext) SDL_GL_DeleteContext(m_glContext);
@@ -173,6 +220,11 @@ bool App::initGL()
 
 void App::run()
 {
+    // Finalize the robot registry and start serving now that the caller has
+    // made all its addRobot() calls (see GrpcServer's own comment on why the
+    // registry must be fixed before its RPC handler threads start reading it).
+    m_grpc->start();
+
     m_lastTick = SDL_GetTicks64();
 
     while (m_running) {
@@ -207,6 +259,10 @@ void App::run()
             m_cameraDistance = newDist;
         }
         m_zoomVelocity *= damping;
+
+        // Always, even when paused, so AddRobot RPCs never block on a pause.
+        m_grpc->processPending();
+        if (m_grpc->shutdownRequested()) m_running = false;
 
         if (!m_paused) {
             update(dt * m_simulationSpeed);
@@ -245,6 +301,16 @@ void App::handleEvent(const SDL_Event& e)
         }
         if (e.key.keysym.scancode == SDL_SCANCODE_L) {
             m_showTelemetryOverlay = !m_showTelemetryOverlay;
+        }
+        // 1/2/3/4 select which robot the keyboard (arrows/space/F below, plus
+        // the camera preview/telemetry overlay) currently acts on -- a no-op
+        // past however many robots addRobot() actually registered.
+        if (e.key.keysym.scancode >= SDL_SCANCODE_1 && e.key.keysym.scancode <= SDL_SCANCODE_4) {
+            int index = (int)(e.key.keysym.scancode - SDL_SCANCODE_1);
+            if (index < (int)m_robots.size()) {
+                m_activeRobot = index;
+                std::cout << "[App] Active robot: " << m_robots[m_activeRobot].id << std::endl;
+            }
         }
         break;
     case SDL_KEYUP:
@@ -311,9 +377,13 @@ void App::handleKeyboardInput(const Uint8* keys, float dt)
     if (keys[SDL_SCANCODE_A]) m_lookTarget -= right * speed;
     if (keys[SDL_SCANCODE_D]) m_lookTarget += right * speed;
 
-    // Arrow keys + Q/E drive the robot directly (manual testing, independent of
-    // gRPC SendCommand). Only send a new target on press/release edges so
-    // this doesn't stomp on commands an active gRPC client is sending.
+    if (m_robots.empty()) return;
+    RobotEntry& active = m_robots[m_activeRobot];
+
+    // Arrow keys + Q/E drive the active robot directly (manual testing,
+    // independent of gRPC SendCommand). Only send a new target on
+    // press/release edges so this doesn't stomp on commands an active gRPC
+    // client is sending.
     float drive = 0.0f, strafe = 0.0f, turn = 0.0f;
     if (keys[SDL_SCANCODE_UP])    drive += 1.0f;
     if (keys[SDL_SCANCODE_DOWN])  drive -= 1.0f;
@@ -326,15 +396,15 @@ void App::handleKeyboardInput(const Uint8* keys, float dt)
     if (keys[SDL_SCANCODE_Q])     strafe -= 1.0f;
     if (keys[SDL_SCANCODE_E])     strafe += 1.0f;
 
-    if (m_robot && (drive != m_lastManualDrive || strafe != m_lastManualStrafe ||
-                    turn != m_lastManualTurn)) {
-        m_robot->setBodyVelocity(
+    if (drive != active.lastManualDrive || strafe != active.lastManualStrafe ||
+        turn != active.lastManualTurn) {
+        active.robot->setBodyVelocity(
             drive  * m_manualDriveSpeed,
             strafe * m_manualDriveSpeed,
             turn   * m_manualTurnSpeed);
-        m_lastManualDrive  = drive;
-        m_lastManualStrafe = strafe;
-        m_lastManualTurn   = turn;
+        active.lastManualDrive  = drive;
+        active.lastManualStrafe = strafe;
+        active.lastManualTurn   = turn;
     }
 
     // Space = spin the dribbler at full capture speed while held, stop on
@@ -345,16 +415,16 @@ void App::handleKeyboardInput(const Uint8* keys, float dt)
     // kicker through open_capacitor()/close_capacitor()/open_kicker()/
     // close_kicker() over gRPC instead, same as SimRobotHAL.
     bool dribbleHeld = keys[SDL_SCANCODE_SPACE] != 0;
-    if (m_dribbler && dribbleHeld != m_lastManualDribbleHeld) {
-        m_dribbler->setTargetSpeed(dribbleHeld ? 1.0f : 0.0f);
-        m_lastManualDribbleHeld = dribbleHeld;
+    if (dribbleHeld != active.lastManualDribbleHeld) {
+        active.dribbler->setTargetSpeed(dribbleHeld ? 1.0f : 0.0f);
+        active.lastManualDribbleHeld = dribbleHeld;
     }
 
     bool kickHeld = keys[SDL_SCANCODE_F] != 0;
-    if (kickHeld && !m_lastManualKickHeld && m_kicker && m_robot && m_ball) {
-        m_kicker->debugFire(*m_robot, *m_ball);
+    if (kickHeld && !active.lastManualKickHeld) {
+        active.kicker->debugFire(*active.robot, *m_ball);
     }
-    m_lastManualKickHeld = kickHeld;
+    active.lastManualKickHeld = kickHeld;
 }
 
 void App::update(float dt)
@@ -363,29 +433,51 @@ void App::update(float dt)
     // be applied before m_physics->step(dt) so they take effect on the next
     // stepSimulation (the dribbler's applyForce is consumed by the step; the
     // kicker's applyImpulse changes velocity immediately). Same reason
-    // Robot::applyDriveForces runs before the step.
-    m_dribbler->update(*m_robot, *m_ball, dt);
-    m_kicker->update(dt);
-    m_robot->applyDriveForces(dt);
+    // Robot::applyDriveForces runs before the step. All robots share one
+    // physics step (one world), so this loop runs for every robot before the
+    // single m_physics->step(dt) call below.
+    for (auto& entry : m_robots) {
+        entry.dribbler->update(*entry.robot, *m_ball, dt);
+        entry.kicker->update(dt);
+        entry.robot->applyDriveForces(dt);
+    }
     m_physics->step(dt);
-    m_robot->syncFromPhysics();
+    for (auto& entry : m_robots) {
+        entry.robot->syncFromPhysics();
+    }
     m_ball->syncFromPhysics();
-    m_lidar->update(m_robot->position(), m_robot->orientation(), dt);
-    m_imu->update(*m_robot, dt);
+    for (auto& entry : m_robots) {
+        entry.lidar->update(entry.robot->position(), entry.robot->orientation(), dt);
+        entry.imu->update(*entry.robot, dt);
+    }
     m_grpc->update(dt);
 }
 
 void App::render()
 {
-    // ---- Robot mirror-camera pass (offscreen) ----
-    m_camera->renderView(m_robot->position(), m_robot->orientation(),
-        [&](Renderer& r) {
-            m_field->render(r);
-            r.drawShadowBlob(m_ball->position(), m_ball->radius());
-            r.drawShadowBlob(m_robot->position(), m_robot->diameter() * 0.5f);
-            m_robot->renderCameraFrame(r); // pillars only, not the full body — see Robot.h
-            m_ball->render(r);
-        });
+    // ---- Each robot's own mirror-camera pass (offscreen) ----
+    for (auto& entry : m_robots) {
+        Robot* self = entry.robot.get();
+        entry.camera->renderView(self->position(), self->orientation(),
+            [&](Renderer& r) {
+                m_field->render(r);
+                r.drawShadowBlob(m_ball->position(), m_ball->radius());
+                r.drawShadowBlob(self->position(), self->diameter() * 0.5f);
+                self->renderCameraFrame(r); // pillars only, not the full body — see Robot.h
+                // Every other robot on the field is a real obstacle this
+                // camera should see too (a vision-league robot's own camera
+                // sees teammates/opponents, not just the ball) -- drawn as
+                // renderBody() (body + wheels, same wireframe style the
+                // debug viewer already uses for it), not the stripped
+                // support-frame the camera owner draws for itself above.
+                for (auto& other : m_robots) {
+                    if (other.robot.get() == self) continue;
+                    r.drawShadowBlob(other.robot->position(), other.robot->diameter() * 0.5f);
+                    other.robot->renderBody(r);
+                }
+                m_ball->render(r);
+            });
+    }
     glViewport(0, 0, m_width, m_height);
 
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -409,8 +501,10 @@ void App::render()
     }
     m_field->render(*m_renderer);
     m_renderer->drawShadowBlob(m_ball->position(), m_ball->radius());
-    m_renderer->drawShadowBlob(m_robot->position(), m_robot->diameter() * 0.5f);
-    m_robot->render(*m_renderer);
+    for (auto& entry : m_robots) {
+        m_renderer->drawShadowBlob(entry.robot->position(), entry.robot->diameter() * 0.5f);
+        entry.robot->render(*m_renderer);
+    }
     m_ball->render(*m_renderer);
     if (m_showPhysicsDebug) {
         m_physics->debugDraw(*m_renderer);
@@ -418,19 +512,20 @@ void App::render()
 
     m_renderer->endFrame();
 
-    // ---- Camera preview overlay ----
-    if (m_showCameraPreview) {
+    // ---- Camera preview overlay (active robot only) ----
+    if (m_showCameraPreview && !m_robots.empty()) {
         glViewport(0, 0, m_width, m_height);
-        m_camera->drawPreview(m_width, m_height);
+        m_robots[m_activeRobot].camera->drawPreview(m_width, m_height);
     }
 
-    // ---- Telemetry overlay (L key) ----
-    if (m_showTelemetryOverlay && m_debugOverlay) {
+    // ---- Telemetry overlay (L key, active robot only) ----
+    if (m_showTelemetryOverlay && m_debugOverlay && !m_robots.empty()) {
         glViewport(0, 0, m_width, m_height);
 
-        glm::vec3 pos = m_robot->position();
+        RobotEntry& active = m_robots[m_activeRobot];
+        glm::vec3 pos = active.robot->position();
         glm::vec3 ballPos = m_ball->position();
-        float yaw = m_robot->orientation();
+        float yaw = active.robot->orientation();
         float cosYaw = std::cos(yaw), sinYaw = std::sin(yaw);
         float dx = ballPos.x - pos.x, dz = ballPos.z - pos.z;
         float ballLocalX = cosYaw * dx - sinYaw * dz;
@@ -440,21 +535,23 @@ void App::render()
         ss << std::fixed << std::setprecision(3);
         std::vector<std::string> lines;
 
+        ss.str(""); ss << "robot " << active.id << " / " << m_robots.size();
+        lines.push_back(ss.str());
         ss.str(""); ss << "pos x=" << pos.x << " z=" << pos.z << " yaw=" << yaw;
         lines.push_back(ss.str());
-        ss.str(""); ss << "vel=" << m_robot->velocity() << " m/s  omega=" << m_robot->angularVelocity() << " rad/s";
+        ss.str(""); ss << "vel=" << active.robot->velocity() << " m/s  omega=" << active.robot->angularVelocity() << " rad/s";
         lines.push_back(ss.str());
-        ss.str(""); ss << "odom x=" << m_robot->odometryX() << " z=" << m_robot->odometryZ() << " yaw=" << m_robot->odometryYaw();
+        ss.str(""); ss << "odom x=" << active.robot->odometryX() << " z=" << active.robot->odometryZ() << " yaw=" << active.robot->odometryYaw();
         lines.push_back(ss.str());
-        ss.str(""); ss << "dribbler rpm=" << std::setprecision(0) << m_dribbler->rpm();
+        ss.str(""); ss << "dribbler rpm=" << std::setprecision(0) << active.dribbler->rpm();
         lines.push_back(ss.str());
-        ss.str(""); ss << std::setprecision(3) << "cap=" << m_kicker->capacitorVoltage() << "V ("
-            << m_kicker->charge() * 100.0f << "%)  bus=" << m_kicker->busVoltage() << "V";
+        ss.str(""); ss << std::setprecision(3) << "cap=" << active.kicker->capacitorVoltage() << "V ("
+            << active.kicker->charge() * 100.0f << "%)  bus=" << active.kicker->busVoltage() << "V";
         lines.push_back(ss.str());
         ss.str(""); ss << "ball local fwd=" << ballLocalX << " lat=" << ballLocalZ;
         lines.push_back(ss.str());
-        ss.str(""); ss << "imu rpy=" << m_imu->roll() << "," << m_imu->pitch() << "," << m_imu->yaw()
-            << "  gyro_y=" << m_imu->angularVelocity().y;
+        ss.str(""); ss << "imu rpy=" << active.imu->roll() << "," << active.imu->pitch() << "," << active.imu->yaw()
+            << "  gyro_y=" << active.imu->angularVelocity().y;
         lines.push_back(ss.str());
 
         m_debugOverlay->draw(m_width, m_height, lines);

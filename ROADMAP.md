@@ -8,10 +8,10 @@ for humans and AI agents alike.
 
 - SDL2 + OpenGL 3.3 core window with orbit/pan/zoom viewer camera (`App`)
 - Field geometry and line/goal/wall rendering from config (`Field`)
-- Single robot: a real Bullet rigid body driven by a 3-omni-wheel drivetrain
-  with per-wheel Coulomb friction/slip, motor lag, and a separately-drifting
-  dead-reckoning odometry estimate (`Robot`) — commanded in body-frame
-  `vx`/`vy`/`omega`
+- Multi-robot field (`App::addRobot`, see item 6 below): any number of robots, each a real
+  Bullet rigid body driven by a 3-omni-wheel drivetrain with per-wheel Coulomb friction/slip,
+  motor lag, and a separately-drifting dead-reckoning odometry estimate (`Robot`) — commanded
+  in body-frame `vx`/`vy`/`omega`, multiplexed by `robot_id` over one gRPC port
 - Bullet physics world with a ground plane + the robot chassis (`Physics`)
 - Config loading from JSON with dot-path lookup and mm→m conversion (`Config`)
 - gRPC server (`GrpcServer` + `SimulatorServiceImpl`): `SensorStream` (camera image + pose
@@ -33,10 +33,11 @@ Ranked by what's most load-bearing for the project's actual purpose (feeding vis
 robot-control client) — do this roughly top to bottom, but treat it as a starting point to
 argue with, not a mandate.
 
-Items 1, 2, 3, 4, 5 and 8 are **done** — see [`docs/tasks/mirror-camera-vision.md`](docs/tasks/mirror-camera-vision.md)
+Items 1, 2, 3, 4, 5, 6 and 8 are **done** — see [`docs/tasks/mirror-camera-vision.md`](docs/tasks/mirror-camera-vision.md)
 (items 1–2), [`docs/tasks/ball-physics.md`](docs/tasks/ball-physics.md) (item 3, plus the
 wall/goal half of item 7), [`docs/tasks/omni-wheel-dynamics.md`](docs/tasks/omni-wheel-dynamics.md)
-(item 4), [`docs/tasks/dribbler-kicker.md`](docs/tasks/dribbler-kicker.md) (item 5) and
+(item 4), [`docs/tasks/dribbler-kicker.md`](docs/tasks/dribbler-kicker.md) (item 5),
+[`docs/tasks/multi-robot.md`](docs/tasks/multi-robot.md) (item 6) and
 [`docs/tasks/lidar-sensor.md`](docs/tasks/lidar-sensor.md) (item 8) for how they
 were implemented.
 
@@ -99,11 +100,19 @@ were implemented.
     mirroring the real driver's own `getVector(VECTOR_*)` call shape. See
     [`docs/tasks/imu-sensor.md`](docs/tasks/imu-sensor.md).
 
-6. **Multi-robot support** — `App` holds a single `std::unique_ptr<Robot> m_robot`, but
-   `SensorRequest`/`RobotCommand` already carry `robot_id`. If the target league needs more
-   than one robot (own team and/or opponents) on the field, this needs a robot registry
-   (e.g. `std::map<int, Robot>`) instead of a single instance. (Unaffected by item 4 — still
-   open.)
+6. ~~Multi-robot support~~ — done: the field starts empty; `App::addRobot(configPath, spawnX,
+   spawnZ, spawnYawDeg)` constructs one robot (its own `Robot`/`Camera`/`LidarSensor`/`Dribbler`/
+   `Kicker`/`ImuSensor`, and its own `Config` -- a copy of the shared project config with that
+   robot's own JSON file merged on top) and registers it with `GrpcServer` under an auto-assigned
+   `robot_id`, multiplexed over one gRPC port (`SharedState` is now one-per-robot, keyed by
+   `robot_id`, not a single instance). The 1/2/3/4 keys pick which registered robot the keyboard
+   (arrows/Q/E/Space/F) and the camera-preview/telemetry overlays act on. `main.cpp`'s
+   `--robot <path>` (repeatable) and `--robot-spawn <x> <z> <yaw>` flags expose the same call from
+   the command line; with no `--robot` flags it still adds exactly one robot from
+   `<config-dir>/robot.json`, matching the previous single-robot default (`--empty` skips that
+   fallback). Robots can also be added at runtime, after the simulator is already running, via the
+   `Simulator.AddRobot` gRPC call (`python/robot_hal.py`'s `SimulatorClient.add_robot()`) -- not
+   just "in code" before `App::run()`. See [`docs/tasks/multi-robot.md`](docs/tasks/multi-robot.md).
 
 7. **Field collision** — walls/goals are drawn (`Field::render`); the four boundary walls and
    both goal structures (side + back walls) have static collision boxes with full contact

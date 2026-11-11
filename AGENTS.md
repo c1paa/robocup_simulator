@@ -7,9 +7,9 @@ fixed once.
 ## Before you start
 
 - Read [`ROADMAP.md`](ROADMAP.md) to see what's an intentional stub vs. a bug. Things that look
-  unfinished (currently: the missing ball, robot not hooked into Bullet physics, kicker/dribbler,
-  single-robot-only) are *known* and tracked there, not something to silently "fix" as a side
-  effect of an unrelated task.
+  unfinished (currently: the missing ball, robot not hooked into Bullet physics, kicker/dribbler)
+  are *known* and tracked there, not something to silently "fix" as a side effect of an unrelated
+  task.
 - `git pull` (or `git pull --rebase`) before starting work in a fresh session — see
   [`CONTRIBUTING.md`](CONTRIBUTING.md) for the workflow.
 - If you're about to build, run `bash simulator/setup.sh` once per machine, then
@@ -30,7 +30,21 @@ python/               Python/OpenCV demo client (`viewer.py`) + hardware-abstrac
 
 Class responsibilities (see their headers for the exact interface):
 
-- `App` — window/GL setup, main loop, viewer camera (orbit/pan/zoom), owns all subsystems.
+- `App` — window/GL setup, main loop, viewer camera (orbit/pan/zoom), owns all subsystems. The
+  field starts empty: `App::addRobot(configPath, spawnX, spawnZ, spawnYawDeg)` is the "in code"
+  way to construct a robot (its own `Robot`/`Camera`/`LidarSensor`/`Dribbler`/`Kicker`/`ImuSensor`,
+  and its own slice of `Config` -- see `Config::withRobotOverlay`) and add it to the field; call it
+  once per robot to build up a team (own robots and/or opponents), either before `App::run()` or
+  at runtime via the `Simulator.AddRobot` gRPC call (`GrpcServer::update()` invokes it on the
+  main/sim thread each tick, from a queued request -- robot construction touches Bullet/GL, so it
+  can't happen directly on the gRPC handler thread that received the call). Each `RobotEntry` (see
+  `app.h`) is stored by value in `App::m_robots`; the 1/2/3/4 keys pick which one
+  `App::handleKeyboardInput` (arrows/Q/E drive, Space dribble, F kick) and the camera-preview/
+  telemetry overlays act on (`App::m_activeRobot`). `main.cpp`'s `--robot`/`--robot-spawn` flags are
+  a thin CLI wrapper over the same call, for quick manual multi-robot testing; `--empty` skips the
+  "no `--robot` flags -> add one default robot from `<config-dir>/robot.json`" fallback, for a field
+  built entirely at runtime instead (e.g. from Python's `SimulatorClient.add_robot()`). See
+  [`docs/tasks/multi-robot.md`](docs/tasks/multi-robot.md).
 - `Renderer` — thin immediate-mode-style OpenGL wrapper. `drawLine`/`drawBox`/`drawCylinder`/
   `drawCone` are wireframe (debug-viewer geometry); `drawMesh`/`drawSphere`/`drawSolidBox` are
   filled and lit (Lambertian, via `setLighting` — direction/ambient/diffuse are real uniforms set
@@ -88,9 +102,22 @@ Class responsibilities (see their headers for the exact interface):
   world velocity), and body-frame angular velocity. Updates at its own `update_rate_hz`,
   independent of the render tick (same pattern as `LidarSensor`'s `scan_frequency`). Owned by
   `App`. See [`docs/tasks/imu-sensor.md`](docs/tasks/imu-sensor.md).
-- `GrpcServer` / `SimulatorServiceImpl` — real gRPC server (`SensorStream`/`SendCommand`),
-  bridged to the sim thread via the mutex-guarded `SharedState` (`shared_state.h`).
-- `Config` — JSON config singleton, dot-path lookup (`cfg.getFloat("/robot/diameter", ...)`).
+- `GrpcServer` / `SimulatorServiceImpl` — real gRPC server (`SensorStream`/`SendCommand`/
+  `AddRobot`), multiplexed by `robot_id` over one `std::map<int, SharedState>` (`shared_state.h`)
+  -- one publish/command buffer per robot, each mutex-guarded independently, so one robot's camera
+  cadence never throttles another's. `registerRobot` (called by `App::addRobot`) can now run either
+  before `start()` or later, at runtime, so it and every `SimulatorServiceImpl` lookup take
+  `GrpcServer::m_statesMutex` (shared for lookups, exclusive for `registerRobot`'s insert) --
+  `AddRobot`'s handler queues a `PendingAddRobot` (its own `shared_state.h`) that `GrpcServer::
+  update()` drains and constructs on the main/sim thread, since Bullet/GL work isn't safe on a gRPC
+  handler thread. See [`docs/tasks/multi-robot.md`](docs/tasks/multi-robot.md)'s "Dynamic robot
+  creation" section.
+- `Config` — JSON config, dot-path lookup (`cfg.getFloat("/robot/diameter", ...)`). `instance()` is
+  the one shared/global config (`project.json`: physics/network/viewer/scene/field -- world-level,
+  not per-robot); `Config` is otherwise a plain publicly-constructible value type, and
+  `withRobotOverlay(path)` returns a copy with a robot's own JSON file (`/robot/*`, `/camera/*`)
+  merged on top, used by `App::addRobot` to give each robot on the field its own independent
+  config from the same shared base.
 
 ## Conventions to keep consistent
 

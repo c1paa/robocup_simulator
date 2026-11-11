@@ -189,9 +189,21 @@ void Robot::init(Config& cfg, btDiscreteDynamicsWorld* world)
     if (iz <= 0.0f) iz = 0.5f * m_mass * radius * radius;
     localInertia.setY(iz);
 
+    // Spawn pose: lets App::addRobot place several robots on the field
+    // (own team / opponents) instead of always starting at the origin. Yaw
+    // uses the body's own startTransform rotation directly (no sign flip
+    // needed here -- unlike the wedge-shape rotation above, this is the
+    // whole rigid body's transform, and syncFromPhysics's atan2(-fwd.z(),
+    // fwd.x()) recovers exactly spawnYawRad back out of it for a Y-axis
+    // btQuaternion built from that same angle).
+    float spawnX = cfg.getFloat("/robot/spawn/x", 0.0f) / MM;
+    float spawnZ = cfg.getFloat("/robot/spawn/z", 0.0f) / MM;
+    float spawnYawRad = cfg.getFloat("/robot/spawn/yaw_deg", 0.0f) * DEG2RAD;
+
     btTransform startTransform;
     startTransform.setIdentity();
-    startTransform.setOrigin(btVector3(0.0f, halfH, 0.0f));
+    startTransform.setOrigin(btVector3(spawnX, halfH, spawnZ));
+    startTransform.setRotation(btQuaternion(btVector3(0.0f, 1.0f, 0.0f), spawnYawRad));
     m_motionState = std::make_unique<btDefaultMotionState>(startTransform);
 
     btRigidBody::btRigidBodyConstructionInfo ci(mass, m_motionState.get(),
@@ -221,8 +233,8 @@ void Robot::init(Config& cfg, btDiscreteDynamicsWorld* world)
     m_body->setCcdSweptSphereRadius(radius * 0.5f);
     m_world->addRigidBody(m_body.get());
 
-    m_position = glm::vec3(0.0f, halfH, 0.0f);
-    m_yaw = 0.0f;
+    m_position = glm::vec3(spawnX, halfH, spawnZ);
+    m_yaw = spawnYawRad;
     m_odomX = 0.0f;
     m_odomZ = 0.0f;
     m_odomYaw = 0.0f;

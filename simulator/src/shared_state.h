@@ -5,6 +5,9 @@
 #include <mutex>
 #include <condition_variable>
 #include <cstdint>
+#include <deque>
+#include <memory>
+#include <string>
 #include <vector>
 
 // Mutex-guarded bridge between the simulator thread (App::update) and the
@@ -59,4 +62,36 @@ struct SharedState
     float dribbleSpeed = 0.0f;
     bool capacitorChargeOpen = false;
     bool kickerOpen = false;
+};
+
+// One runtime "add a robot" request, pushed by a SimulatorServiceImpl::
+// AddRobot gRPC handler thread and drained once per frame by GrpcServer::
+// update() on the sim/main thread -- robot construction touches Bullet and
+// GL (camera FBOs), both main-thread-only, so it can't happen directly on
+// the gRPC handler thread that received the request. The handler blocks on
+// this object's own mtx/cv until the main thread fills in the result and
+// sets done, so AddRobot's unary response is only sent once the robot
+// actually exists and can be reached by SendCommand/SensorStream. See
+// docs/tasks/multi-robot.md's "Dynamic robot creation" section.
+struct PendingAddRobot
+{
+    std::string configPath;
+    float spawnX = 0.0f, spawnZ = 0.0f, spawnYawDeg = 0.0f;
+
+    std::mutex mtx;
+    std::condition_variable cv;
+    bool done = false;
+    bool success = false;
+    std::string message;
+    int robotId = -1;
+};
+
+// Queue of pending AddRobot requests, shared between SimulatorServiceImpl
+// (producer, one or more gRPC handler threads) and GrpcServer (consumer, the
+// sim thread). Guarded by its own mutex, separate from each PendingAddRobot's
+// own mtx (which only guards that one request's done/result fields).
+struct AddRobotQueue
+{
+    std::mutex mtx;
+    std::deque<std::shared_ptr<PendingAddRobot>> pending;
 };

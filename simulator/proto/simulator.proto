@@ -8,10 +8,54 @@ service Simulator {
 
     // Client sends control commands to simulator
     rpc SendCommand(stream RobotCommand) returns (CommandResponse);
+
+    // Adds a new robot to the field at runtime and returns its robot_id --
+    // the gRPC-callable equivalent of App::addRobot on the C++ side (see
+    // docs/tasks/multi-robot.md's "Dynamic robot creation" section). Unary:
+    // blocks until the robot is actually constructed and registered (Bullet
+    // rigid body + its own camera FBOs, done on the simulator's own main
+    // thread -- see SimulatorServiceImpl::AddRobot), so a SensorStream/
+    // SendCommand call using the returned robot_id right after this returns
+    // is guaranteed to find it.
+    rpc AddRobot(AddRobotRequest) returns (AddRobotResponse);
+
+    // Liveness/readiness probe; succeeds once the gRPC server is serving.
+    rpc Ping(PingRequest) returns (PingResponse);
+
+    // Asks the simulator to close its window and exit.
+    rpc Shutdown(ShutdownRequest) returns (ShutdownResponse);
 }
+
+message PingRequest {}
+message PingResponse { int32 robot_count = 1; }
+message ShutdownRequest {}
+message ShutdownResponse {}
 
 message SensorRequest {
     int32 robot_id = 1;
+}
+
+message AddRobotRequest {
+    // Path to the robot's config JSON, resolved on the machine running the
+    // simulator (server-side filesystem), relative to the simulator
+    // process's own working directory -- same convention as main.cpp's
+    // --robot CLI flag, NOT relative to the calling client.
+    string config_path = 1;
+
+    // Spawn pose override (mm / degrees). All-zero (the default) means "use
+    // config_path's own /robot/spawn/* (default: origin)" -- see
+    // Config::setRobotSpawn's doc comment for why zero can't be
+    // distinguished from "explicitly place at the origin" (same limitation
+    // App::addRobot already has in C++).
+    float spawn_x = 2;
+    float spawn_z = 3;
+    float spawn_yaw_deg = 4;
+}
+
+message AddRobotResponse {
+    bool success = 1;
+    string message = 2;
+    int32 robot_id = 3; // valid only if success
 }
 
 message SensorData {

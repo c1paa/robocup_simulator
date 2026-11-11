@@ -9,8 +9,13 @@ later `HardwareRobotHAL` (real Raspberry Pi backend) can drop in with the same
 interface once real hardware exists. This is the seed of the abstraction
 described in AGENTS.md, not the robot-control logic itself.
 
-Usage:
-    hal = SimRobotHAL()
+Usage (adding a robot at runtime, then working with it -- see SimulatorClient
+for details, e.g. running the simulator with --empty):
+    sim = SimulatorClient()
+    robot_id = sim.add_robot("configs/robot.json")
+    sim.close()
+
+    hal = SimRobotHAL(robot_id=robot_id)
     hal.connect()
     frame = hal.get_camera_frame()      # np.ndarray (H, W, 3) or None
     pose  = hal.get_pose()              # (x, y, z, yaw) or None
@@ -28,9 +33,13 @@ Usage:
 
     hal.close()
 """
+import abc
+import atexit
 import os
-import sys
 import queue
+import socket
+import subprocess
+import sys
 import threading
 import time
 
@@ -93,8 +102,276 @@ import simulator_pb2
 import simulator_pb2_grpc
 
 
-class SimRobotHAL:
-    """Client-side hardware abstraction for the simulated robot (robot_id 0)."""
+class SimulatorClient:
+    """Thin client for the one simulator-wide operation that isn't scoped to
+    an existing robot: adding a new one. Everything else (driving, sensors,
+    kicker, IMU, ...) goes through SimRobotHAL once you have a robot_id.
+
+    `config_path` is resolved on the machine RUNNING THE SIMULATOR, relative
+    to the simulator process's own working directory -- same convention as
+    main.cpp's --robot flag. If the simulator is running on the same machine
+    as this script (the normal dev setup), that's just a normal path; if it's
+    remote, it must already exist there (this call does not transfer files).
+
+    Typical use, at the start of a control script -- build the whole team up
+    front and then just work with the robots:
+
+        sim = SimulatorClient()
+        red = sim.add_robot("configs/robot.json")
+        blue = sim.add_robot("configs/robot.json", spawn_x=500.0)
+        sim.close()
+
+        hal_red = SimRobotHAL(robot_id=red);  hal_red.connect()
+        hal_blue = SimRobotHAL(robot_id=blue); hal_blue.connect()
+        hal_red.send_velocity(0.5, 0.0, 0.0)
+
+    Robots can be added any time after the simulator process starts (no need
+    to launch it with --robot flags first) -- run it with `--empty` if you
+    don't want the default single robot it otherwise adds when no --robot
+    flags are given. See docs/tasks/multi-robot.md's "Dynamic robot
+    creation" section."""
+
+    def __init__(self, host="localhost", port=50051):
+        self._channel = grpc.insecure_channel(f"{host}:{port}")
+        self._stub = simulator_pb2_grpc.SimulatorStub(self._channel)
+
+    def add_robot(self, config_path, spawn_x=0.0, spawn_z=0.0, spawn_yaw_deg=0.0, timeout=15.0):
+        """Adds a new robot to the field from `config_path` and returns its
+        robot_id. spawn_x/spawn_z (mm) and spawn_yaw_deg override the config
+        file's own /robot/spawn/* (all-zero, the default, means "use the
+        file's own spawn point" -- see AddRobotRequest in simulator.proto).
+        Blocks until the robot actually exists on the simulator side, so a
+        SimRobotHAL(robot_id=...) right after this succeeding will find it.
+        Raises RuntimeError if the simulator rejects the request (e.g. a bad
+        config_path)."""
+        request = simulator_pb2.AddRobotRequest(
+            config_path=config_path, spawn_x=spawn_x, spawn_z=spawn_z,
+            spawn_yaw_deg=spawn_yaw_deg)
+        response = self._stub.AddRobot(request, timeout=timeout)
+        if not response.success:
+            raise RuntimeError(f"add_robot({config_path!r}) failed: {response.message}")
+        return response.robot_id
+
+    def close(self):
+        """Releases the channel. Only needed if you're not about to open
+        SimRobotHAL connections on the same process anyway -- there's no
+        persistent background state to leak, unlike SimRobotHAL.close()."""
+        try:
+            self._channel.close()
+        except Exception:
+            pass
+
+
+_REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+_SIM_DIR = os.path.join(_REPO_ROOT, "simulator")
+DEFAULT_ROBOT_CONFIG = os.path.join(_SIM_DIR, "configs", "robot.json")
+
+
+def _free_port():
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+class Simulator:
+    """Launches and owns a simulator process, so a robot script needs no
+    manual `./run_simulator.sh`. Comment these lines out and the rest of the
+    script runs on the real robot (see create_robot).
+
+        with Simulator() as sim:                # opens the window
+            robot = sim.add_robot()             # connected SimRobotHAL
+            robot.send_velocity(0.5, 0, 0)
+        # leaving the block closes the window
+
+    or without `with`: sim = Simulator().start() ... sim.stop().
+
+    The binary is simulator/build/simulator; if missing it's built first with
+    simulator/build.sh (build_if_missing=True). Starts empty (no robots) --
+    add them with add_robot()."""
+
+    def __init__(self, port=None, build_if_missing=True, host="localhost"):
+        self._host = host
+        self._port = port
+        self._build_if_missing = build_if_missing
+        self._proc = None
+        self._client = None
+        self._robots = []
+
+    @property
+    def port(self):
+        return self._port
+
+    def start(self, timeout=60.0):
+        if self._proc is not None:
+            return self
+        exe = os.path.join(_SIM_DIR, "build", "simulator")
+        if not os.path.exists(exe):
+            if not self._build_if_missing:
+                raise RuntimeError(f"Simulator binary not found: {exe}")
+            print("[Simulator] not built yet, building (simulator/build.sh)...")
+            if subprocess.call([os.path.join(_SIM_DIR, "build.sh")]) != 0 or not os.path.exists(exe):
+                raise RuntimeError("Simulator build failed (see output above)")
+        if self._port is None:
+            self._port = _free_port()
+
+        self._proc = subprocess.Popen(
+            [exe, "--config-dir", os.path.join(_SIM_DIR, "configs"), "--empty",
+             "--port", str(self._port)],
+            cwd=_REPO_ROOT)
+        atexit.register(self.stop)
+
+        self._client = SimulatorClient(self._host, self._port)
+        deadline = time.time() + timeout
+        while True:
+            if self._proc.poll() is not None:
+                raise RuntimeError(f"Simulator exited at startup (code {self._proc.returncode})")
+            try:
+                self._client._stub.Ping(simulator_pb2.PingRequest(), timeout=1.0)
+                break
+            except grpc.RpcError:
+                if time.time() > deadline:
+                    self.stop()
+                    raise RuntimeError(f"Simulator did not become ready within {timeout}s")
+                time.sleep(0.2)
+        return self
+
+    def add_robot(self, config_path=None, spawn_x=0.0, spawn_z=0.0, spawn_yaw_deg=0.0):
+        """Adds a robot and returns a connected SimRobotHAL. config_path
+        defaults to simulator/configs/robot.json; relative paths are resolved
+        against the current directory here, on the client."""
+        if self._proc is None:
+            self.start()
+        path = os.path.abspath(config_path) if config_path else DEFAULT_ROBOT_CONFIG
+        robot_id = self._client.add_robot(path, spawn_x, spawn_z, spawn_yaw_deg)
+        hal = SimRobotHAL(self._host, self._port, robot_id)
+        hal.connect()
+        self._robots.append(hal)
+        return hal
+
+    def stop(self):
+        """Closes robot connections and the simulator window. Idempotent."""
+        if self._proc is None:
+            return
+        for hal in self._robots:
+            hal.close()
+        self._robots = []
+        try:
+            self._client._stub.Shutdown(simulator_pb2.ShutdownRequest(), timeout=2.0)
+        except grpc.RpcError:
+            pass
+        self._client.close()
+        try:
+            self._proc.wait(timeout=5.0)
+        except subprocess.TimeoutExpired:
+            self._proc.terminate()
+            try:
+                self._proc.wait(timeout=3.0)
+            except subprocess.TimeoutExpired:
+                self._proc.kill()
+        self._proc = None
+        atexit.unregister(self.stop)
+
+    def __enter__(self):
+        return self.start()
+
+    def __exit__(self, *exc):
+        self.stop()
+
+
+def create_robot(sim=None, **add_robot_kwargs):
+    """Backend switch for robot scripts. ROBOT_BACKEND=hw (env) returns a
+    HardwareRobotHAL; otherwise `sim` (a Simulator) adds and returns a
+    SimRobotHAL. Lets the same script run in the simulator or on the robot."""
+    if os.environ.get("ROBOT_BACKEND", "sim").lower() == "hw":
+        return HardwareRobotHAL()
+    if sim is None:
+        raise ValueError("create_robot: pass a Simulator (or set ROBOT_BACKEND=hw)")
+    return sim.add_robot(**add_robot_kwargs)
+
+
+class RobotHAL(abc.ABC):
+    """Backend-independent robot interface: everything a real robot can do or
+    measure. Write robot code against this and it runs unchanged on
+    SimRobotHAL (simulator) or HardwareRobotHAL (real robot).
+
+    Ground-truth getters that only a simulator can know (get_pose,
+    get_ball_position) are deliberately NOT part of this interface -- they
+    live on SimRobotHAL only, so code that needs them can't silently be
+    swapped onto hardware."""
+
+    @abc.abstractmethod
+    def connect(self, timeout=15.0): ...
+    @abc.abstractmethod
+    def close(self): ...
+
+    @abc.abstractmethod
+    def get_camera_frame(self): ...
+    @abc.abstractmethod
+    def get_odometry(self): ...
+    @abc.abstractmethod
+    def get_dribbler_rpm(self): ...
+    @abc.abstractmethod
+    def get_capacitor_charge(self): ...
+    @abc.abstractmethod
+    def get_capacitor_voltage(self): ...
+    @abc.abstractmethod
+    def get_bus_voltage(self): ...
+    @abc.abstractmethod
+    def get_imu_orientation(self): ...
+    @abc.abstractmethod
+    def get_imu_acceleration(self): ...
+    @abc.abstractmethod
+    def get_imu_angular_velocity(self): ...
+    @abc.abstractmethod
+    def get_lidar_scan(self): ...
+
+    @abc.abstractmethod
+    def send_velocity(self, vx, vy, omega): ...
+    @abc.abstractmethod
+    def dribble(self, speed): ...
+    @abc.abstractmethod
+    def open_capacitor(self): ...
+    @abc.abstractmethod
+    def close_capacitor(self): ...
+    @abc.abstractmethod
+    def open_kicker(self): ...
+    @abc.abstractmethod
+    def close_kicker(self): ...
+
+    def __enter__(self):
+        self.connect()
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
+
+
+class HardwareRobotHAL(RobotHAL):
+    """Real-robot backend (Raspberry Pi). Not implemented yet: every method
+    raises NotImplementedError. Fill these in with the actual drivers (motor
+    controller, camera, IMU, ...) -- the signatures and return formats are
+    the ones documented on SimRobotHAL."""
+
+    def _todo(self, *a, **k):
+        raise NotImplementedError("HardwareRobotHAL: real-robot driver not written yet")
+
+    connect = close = get_camera_frame = get_odometry = get_dribbler_rpm = _todo
+    get_capacitor_charge = get_capacitor_voltage = get_bus_voltage = _todo
+    get_imu_orientation = get_imu_acceleration = get_imu_angular_velocity = _todo
+    get_lidar_scan = send_velocity = dribble = _todo
+    open_capacitor = close_capacitor = open_kicker = close_kicker = _todo
+
+
+class SimRobotHAL(RobotHAL):
+    """Client-side hardware abstraction for one simulated robot.
+
+    The simulator can host several robots at once (see App::addRobot /
+    docs/tasks/multi-robot.md on the C++ side, or main.cpp's repeatable
+    --robot flag) -- pass the robot's id (0, 1, 2, ... in the order they were
+    added on the simulator side) as `robot_id` to talk to that specific one.
+    Each id gets an independent command/sensor-stream buffer, so multiple
+    SimRobotHAL instances against the same simulator (different robot_id,
+    same host/port) never interfere with each other."""
 
     def __init__(self, host="localhost", port=50051, robot_id=0):
         self._robot_id = robot_id

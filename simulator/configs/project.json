@@ -68,7 +68,7 @@
             "color": [1.0, 0.45, 0.0]
         },
         "robot": {
-            "mass": 2500,
+            "mass": 2100,
             "friction": 0.0,
             "restitution": 0.0
         }

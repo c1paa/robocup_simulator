@@ -1,5 +1,10 @@
 {
     "robot": {
+        "spawn": {
+            "x": 0,
+            "z": 0,
+            "yaw_deg": 0
+        },
         "diameter": 180,
         "height": 150,
         "wheels": {

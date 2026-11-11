@@ -29,6 +29,20 @@ void Config::loadRobot(const std::string& path)
     m_data.merge_patch(robot);
 }
 
+Config Config::withRobotOverlay(const std::string& path) const
+{
+    Config copy = *this;
+    copy.loadRobot(path);
+    return copy;
+}
+
+void Config::setRobotSpawn(float xMm, float zMm, float yawDeg)
+{
+    m_data["robot"]["spawn"]["x"] = xMm;
+    m_data["robot"]["spawn"]["z"] = zMm;
+    m_data["robot"]["spawn"]["yaw_deg"] = yawDeg;
+}
+
 const json* Config::resolve(const std::string& dotPath) const
 {
     const json* current = &m_data;
@@ -58,4 +72,9 @@ std::string Config::getString(const std::string& key, const std::string& default
 {
     const json* node = resolve(key);
     return (node && node->is_string()) ? node->get<std::string>() : defaultVal;
+}
+
+void Config::setGrpcPort(int port)
+{
+    m_data["network"]["grpc_port"] = port;
 }
