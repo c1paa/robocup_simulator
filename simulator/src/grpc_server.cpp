@@ -95,7 +95,10 @@ void GrpcServer::stop()
         }
     }
 
-    if (m_server) m_server->Shutdown();
+    // With a deadline: plain Shutdown() waits forever for in-flight RPCs, and a
+    // connected client's open SendCommand stream (blocked in Read) never ends
+    // by itself -- closing the window would hang. The deadline cancels them.
+    if (m_server) m_server->Shutdown(std::chrono::system_clock::now() + std::chrono::milliseconds(300));
     if (m_thread.joinable()) m_thread.join();
     m_server.reset();
     m_service.reset();
