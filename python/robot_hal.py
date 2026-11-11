@@ -37,9 +37,11 @@ import abc
 import atexit
 import os
 import queue
+import signal
 import socket
 import subprocess
 import sys
+import _thread
 import threading
 import time
 
@@ -187,9 +189,13 @@ class Simulator:
 
     The binary is simulator/build/simulator; if missing it's built first with
     simulator/build.sh (build_if_missing=True). Starts empty (no robots) --
-    add them with add_robot()."""
+    add them with add_robot(). With exit_on_close=True (default) closing the
+    window raises KeyboardInterrupt in your script; poll is_running() instead
+    if you prefer (pass exit_on_close=False)."""
 
-    def __init__(self, port=None, build_if_missing=True, host="localhost"):
+    def __init__(self, port=None, build_if_missing=True, host="localhost", exit_on_close=True):
+        self._exit_on_close = exit_on_close
+        self._stopping = False
         self._host = host
         self._port = port
         self._build_if_missing = build_if_missing
@@ -219,6 +225,7 @@ class Simulator:
              "--port", str(self._port)],
             cwd=_REPO_ROOT)
         atexit.register(self.stop)
+        self._stopping = False
 
         self._client = SimulatorClient(self._host, self._port)
         deadline = time.time() + timeout
@@ -233,7 +240,25 @@ class Simulator:
                     self.stop()
                     raise RuntimeError(f"Simulator did not become ready within {timeout}s")
                 time.sleep(0.2)
+        if self._exit_on_close:  # only after startup, so a failed start raises normally
+            threading.Thread(target=self._watch_window, args=(self._proc,), daemon=True).start()
         return self
+
+    def is_running(self):
+        """False once the window was closed (X / Esc) or stop() was called."""
+        return self._proc is not None and self._proc.poll() is None
+
+    def _watch_window(self, proc):
+        """If the user closes the window, interrupt the script's main thread
+        (KeyboardInterrupt, so `finally:`/`with` cleanup still runs)."""
+        proc.wait()
+        if self._stopping:
+            return
+        print("[Simulator] window closed, stopping the script.")
+        if os.name == "nt":
+            _thread.interrupt_main()
+        else:
+            os.kill(os.getpid(), signal.SIGINT)  # real signal: also wakes time.sleep()
 
     def add_robot(self, config_path=None, spawn_x=0.0, spawn_z=0.0, spawn_yaw_deg=0.0):
         """Adds a robot and returns a connected SimRobotHAL. config_path
@@ -252,14 +277,17 @@ class Simulator:
         """Closes robot connections and the simulator window. Idempotent."""
         if self._proc is None:
             return
+        self._stopping = True
         for hal in self._robots:
             hal.close()
         self._robots = []
-        try:
-            self._client._stub.Shutdown(simulator_pb2.ShutdownRequest(), timeout=2.0)
-        except grpc.RpcError:
-            pass
-        self._client.close()
+        if self._proc.poll() is None:
+            try:
+                self._client._stub.Shutdown(simulator_pb2.ShutdownRequest(), timeout=2.0)
+            except grpc.RpcError:
+                pass
+        if self._client is not None:
+            self._client.close()
         try:
             self._proc.wait(timeout=5.0)
         except subprocess.TimeoutExpired:

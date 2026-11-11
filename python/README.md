@@ -197,3 +197,19 @@ sim.stop()                       # closes the window
 `NotImplementedError`. Code written against `RobotHAL` runs on either backend;
 `get_pose()` / `get_ball_position()` are simulator ground truth and exist on
 `SimRobotHAL` only. See `examples/main.py`.
+
+## VS Code autocomplete
+
+1. Pick the interpreter you ran `pip install -e robocup_simulator/python` in
+   (Ctrl/Cmd+Shift+P -> "Python: Select Interpreter").
+2. If `robot_hal` is still unresolved (Pylance often can't follow editable
+   installs), add to your robot project's `.vscode/settings.json`:
+   `{ "python.analysis.extraPaths": ["robocup_simulator/python"] }`
+   and run "Developer: Reload Window".
+
+## Closing the window
+
+By default (`Simulator(exit_on_close=True)`) closing the simulator window
+(X or Esc) interrupts your script with `KeyboardInterrupt`, so `finally:` /
+`with` cleanup runs. Use `sim.is_running()` in a loop instead if you prefer
+(`Simulator(exit_on_close=False)`).
