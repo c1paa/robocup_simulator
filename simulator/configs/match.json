@@ -1,0 +1,8 @@
+{
+    "slots": {
+        "red_1":  { "team": "red",  "robot_config": "robot.json", "spawn": { "x": -600.0, "z": -300.0, "yaw_deg": 0.0 } },
+        "red_2":  { "team": "red",  "robot_config": "robot.json", "spawn": { "x": -600.0, "z":  300.0, "yaw_deg": 0.0 } },
+        "blue_1": { "team": "blue", "robot_config": "robot.json", "spawn": { "x":  600.0, "z": -300.0, "yaw_deg": 180.0 } },
+        "blue_2": { "team": "blue", "robot_config": "robot.json", "spawn": { "x":  600.0, "z":  300.0, "yaw_deg": 180.0 } }
+    }
+}

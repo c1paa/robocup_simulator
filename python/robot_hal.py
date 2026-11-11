@@ -154,6 +154,21 @@ class SimulatorClient:
             raise RuntimeError(f"add_robot({config_path!r}) failed: {response.message}")
         return response.robot_id
 
+    def join(self, slot, token=None, timeout=15.0):
+        """Claims match slot `slot` (see simulator/configs/match.json); returns
+        (robot_id, token, team). Raises RuntimeError if the slot is unknown or
+        taken. Pass the token from an earlier join to reconnect to your slot."""
+        response = self._stub.Join(
+            simulator_pb2.JoinRequest(slot=slot, token=token or ""), timeout=timeout)
+        if not response.success:
+            raise RuntimeError(f"join({slot!r}) failed: {response.message}")
+        return response.robot_id, response.token, response.team
+
+    def list_slots(self):
+        """[(slot, team, claimed, robot_id), ...] for the running match."""
+        r = self._stub.ListRobots(simulator_pb2.ListRobotsRequest(), timeout=5.0)
+        return [(x.slot, x.team, x.claimed, x.robot_id) for x in r.slots]
+
     def close(self):
         """Releases the channel. Only needed if you're not about to open
         SimRobotHAL connections on the same process anyway -- there's no
@@ -194,6 +209,7 @@ class Simulator:
     if you prefer (pass exit_on_close=False)."""
 
     def __init__(self, port=None, build_if_missing=True, host="localhost", exit_on_close=True):
+        self._attached = False
         self._exit_on_close = exit_on_close
         self._stopping = False
         self._host = host
@@ -244,8 +260,62 @@ class Simulator:
             threading.Thread(target=self._watch_window, args=(self._proc,), daemon=True).start()
         return self
 
+    @classmethod
+    def connect(cls, host="localhost", port=50051, exit_on_close=True, timeout=30.0):
+        """Attaches to a simulator that is ALREADY running (e.g. started with
+        `./run_simulator.sh --match configs/match.json`) instead of launching
+        one. stop() only disconnects; it never closes that simulator."""
+        sim = cls(port=port, host=host, exit_on_close=exit_on_close)
+        sim._attached = True
+        sim._client = SimulatorClient(host, port)
+        deadline = time.time() + timeout
+        while True:
+            try:
+                sim._client._stub.Ping(simulator_pb2.PingRequest(), timeout=1.0)
+                break
+            except grpc.RpcError:
+                if time.time() > deadline:
+                    raise RuntimeError(
+                        f"No simulator on {host}:{port}. Start it first (./run_simulator.sh).")
+                time.sleep(0.3)
+        if exit_on_close:
+            threading.Thread(target=sim._watch_remote, daemon=True).start()
+        return sim
+
+    def join(self, slot, token=None):
+        """Claims match slot `slot` and returns a connected SimRobotHAL
+        playing as that slot (see simulator/configs/match.json)."""
+        robot_id, token, _team = self._client.join(slot, token)
+        hal = SimRobotHAL(self._host, self._port, robot_id, token=token)
+        hal.connect()
+        self._robots.append(hal)
+        return hal
+
+    def _watch_remote(self):
+        """Attached mode: the process isn't ours, so poll it; end the script
+        once the simulator stops answering."""
+        misses = 0
+        while not self._stopping:
+            time.sleep(1.0)
+            try:
+                self._client._stub.Ping(simulator_pb2.PingRequest(), timeout=1.0)
+                misses = 0
+            except grpc.RpcError:
+                misses += 1
+                if misses >= 2 and not self._stopping:
+                    self._interrupt_main("simulator closed")
+                    return
+
     def is_running(self):
         """False once the window was closed (X / Esc) or stop() was called."""
+        if self._attached:
+            if self._stopping or self._client is None:
+                return False
+            try:
+                self._client._stub.Ping(simulator_pb2.PingRequest(), timeout=1.0)
+                return True
+            except grpc.RpcError:
+                return False
         return self._proc is not None and self._proc.poll() is None
 
     def _watch_window(self, proc):
@@ -254,7 +324,10 @@ class Simulator:
         proc.wait()
         if self._stopping:
             return
-        print("[Simulator] window closed, stopping the script.")
+        self._interrupt_main("window closed")
+
+    def _interrupt_main(self, why):
+        print(f"[Simulator] {why}, stopping the script.")
         if os.name == "nt":
             _thread.interrupt_main()
         else:
@@ -264,7 +337,7 @@ class Simulator:
         """Adds a robot and returns a connected SimRobotHAL. config_path
         defaults to simulator/configs/robot.json; relative paths are resolved
         against the current directory here, on the client."""
-        if self._proc is None:
+        if self._client is None:
             self.start()
         path = os.path.abspath(config_path) if config_path else DEFAULT_ROBOT_CONFIG
         robot_id = self._client.add_robot(path, spawn_x, spawn_z, spawn_yaw_deg)
@@ -274,7 +347,18 @@ class Simulator:
         return hal
 
     def stop(self):
-        """Closes robot connections and the simulator window. Idempotent."""
+        """Closes robot connections and, if this object launched it, the
+        simulator window. Idempotent."""
+        if self._attached:
+            if self._client is None:
+                return
+            self._stopping = True
+            for hal in self._robots:
+                hal.close()
+            self._robots = []
+            self._client.close()
+            self._client = None
+            return
         if self._proc is None:
             return
         self._stopping = True
@@ -306,15 +390,35 @@ class Simulator:
         self.stop()
 
 
-def create_robot(sim=None, **add_robot_kwargs):
-    """Backend switch for robot scripts. ROBOT_BACKEND=hw (env) returns a
-    HardwareRobotHAL; otherwise `sim` (a Simulator) adds and returns a
-    SimRobotHAL. Lets the same script run in the simulator or on the robot."""
+def create_robot(sim=None, slot=None, **add_robot_kwargs):
+    """The one call robot scripts need; picks the mode itself:
+
+      ROBOT_BACKEND=hw                  -> HardwareRobotHAL (real robot)
+      ROBOCUP_SIM=host:port + a slot    -> joins a match on a simulator that is
+        (ROBOCUP_SLOT or slot=)            already running, playing as that slot
+      otherwise                         -> personal mode: launches its own
+                                           simulator with only this robot
+
+    `sim` (an existing Simulator) can still be passed to add a robot to it.
+    robot.close() also closes a simulator this call launched."""
     if os.environ.get("ROBOT_BACKEND", "sim").lower() == "hw":
         return HardwareRobotHAL()
-    if sim is None:
-        raise ValueError("create_robot: pass a Simulator (or set ROBOT_BACKEND=hw)")
-    return sim.add_robot(**add_robot_kwargs)
+    if sim is not None:
+        return sim.add_robot(**add_robot_kwargs)
+    addr = os.environ.get("ROBOCUP_SIM")
+    slot = slot or os.environ.get("ROBOCUP_SLOT")
+    if addr:
+        if not slot:
+            raise ValueError("ROBOCUP_SIM is set but no slot: set ROBOCUP_SLOT or pass slot=")
+        host, _, port = addr.rpartition(":")
+        sim = Simulator.connect(host or "localhost", int(port))
+        hal = sim.join(slot)
+        hal._owner = sim
+        return hal
+    sim = Simulator().start()
+    hal = sim.add_robot(**add_robot_kwargs)
+    hal._owner = sim
+    return hal
 
 
 class RobotHAL(abc.ABC):
@@ -401,8 +505,11 @@ class SimRobotHAL(RobotHAL):
     SimRobotHAL instances against the same simulator (different robot_id,
     same host/port) never interfere with each other."""
 
-    def __init__(self, host="localhost", port=50051, robot_id=0):
+    def __init__(self, host="localhost", port=50051, robot_id=0, token=None, _owner=None):
         self._robot_id = robot_id
+        self._metadata = (("x-robot-token", token),) if token else None
+        self._owner = _owner        # Simulator to stop when this HAL closes (personal mode)
+        self._stream_error = None
         self._channel = grpc.insecure_channel(f"{host}:{port}")
         self._stub = simulator_pb2_grpc.SimulatorStub(self._channel)
 
@@ -460,6 +567,8 @@ class SimRobotHAL(RobotHAL):
 
         deadline = time.time() + timeout
         while self._latest_data() is None:
+            if self._stream_error is not None:
+                raise RuntimeError(f"Simulator rejected the connection: {self._stream_error.details()}")
             if time.time() > deadline:
                 raise RuntimeError(
                     f"Connected to the simulator but received no sensor data within "
@@ -477,6 +586,8 @@ class SimRobotHAL(RobotHAL):
             self._channel.close()
         except Exception:
             pass
+        if self._owner is not None:
+            self._owner.stop()
 
     # ---- sensor accessors ----
 
@@ -662,11 +773,12 @@ class SimRobotHAL(RobotHAL):
     def _sensor_loop(self):
         request = simulator_pb2.SensorRequest(robot_id=self._robot_id)
         try:
-            for data in self._stub.SensorStream(request):
+            for data in self._stub.SensorStream(request, metadata=self._metadata):
                 with self._lock:
                     self._latest = data
-        except grpc.RpcError:
-            pass
+        except grpc.RpcError as e:
+            if e.code() == grpc.StatusCode.PERMISSION_DENIED:
+                self._stream_error = e
 
     def _command_generator(self):
         while True:
@@ -677,6 +789,6 @@ class SimRobotHAL(RobotHAL):
 
     def _command_loop(self):
         try:
-            self._stub.SendCommand(self._command_generator())
+            self._stub.SendCommand(self._command_generator(), metadata=self._metadata)
         except grpc.RpcError:
             pass

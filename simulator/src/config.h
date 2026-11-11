@@ -46,6 +46,10 @@ public:
     // pick a free port without editing project.json.
     void setGrpcPort(int port);
 
+    // Loads a match config (slots: team/robot_config/spawn per named slot)
+    // under /match -- see SimulatorServiceImpl::Join.
+    void loadMatch(const std::string& path);
+
     void setConfigDir(const std::string& dir) { m_configDir = dir; }
     const std::string& configDir() const { return m_configDir; }
 

@@ -213,3 +213,21 @@ By default (`Simulator(exit_on_close=True)`) closing the simulator window
 (X or Esc) interrupts your script with `KeyboardInterrupt`, so `finally:` /
 `with` cleanup runs. Use `sim.is_running()` in a loop instead if you prefer
 (`Simulator(exit_on_close=False)`).
+
+## Match mode (several robots, one program each)
+
+Start one simulator and let every robot program join it by slot name:
+
+```
+./run_simulator.sh --match simulator/configs/match.json     # terminal 1
+ROBOCUP_SIM=localhost:50051 ROBOCUP_SLOT=red_1 python my_robot.py    # terminal 2
+ROBOCUP_SIM=localhost:50051 ROBOCUP_SLOT=blue_1 python other_bot.py  # terminal 3
+```
+
+`match.json` defines the slots (team, robot config, spawn in mm). Inside the
+script nothing changes: `robot = create_robot()` picks the mode -- match if
+`ROBOCUP_SIM` is set, a personal simulator otherwise, hardware with
+`ROBOT_BACKEND=hw`. Explicit form: `sim = Simulator.connect("localhost", 50051);
+robot = sim.join("red_1")`. A slot can be claimed once; each robot accepts
+commands only from the program holding its token. Closing the window ends all
+programs (KeyboardInterrupt).

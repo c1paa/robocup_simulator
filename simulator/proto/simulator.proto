@@ -22,8 +22,41 @@ service Simulator {
     // Liveness/readiness probe; succeeds once the gRPC server is serving.
     rpc Ping(PingRequest) returns (PingResponse);
 
+    // Match mode: claims a named slot from the simulator's --match config,
+    // creating that slot's robot (team, spawn, robot config) and returning
+    // its robot_id plus a secret token. SendCommand/SensorStream for a
+    // Join()ed robot require that token (gRPC metadata "x-robot-token"), so
+    // one program cannot drive another's robot. Re-joining a claimed slot is
+    // allowed only with the token from the original Join (reconnect).
+    rpc Join(JoinRequest) returns (JoinResponse);
+
+    // Lists the match slots and whether each one is claimed.
+    rpc ListRobots(ListRobotsRequest) returns (ListRobotsResponse);
+
     // Asks the simulator to close its window and exit.
     rpc Shutdown(ShutdownRequest) returns (ShutdownResponse);
+}
+
+message JoinRequest {
+    string slot = 1;
+    string token = 2; // only to reconnect to a slot you already own
+}
+message JoinResponse {
+    bool success = 1;
+    string message = 2;
+    int32 robot_id = 3;
+    string token = 4;
+    string team = 5;
+}
+message ListRobotsRequest {}
+message SlotInfo {
+    string slot = 1;
+    string team = 2;
+    bool claimed = 3;
+    int32 robot_id = 4; // valid only if claimed
+}
+message ListRobotsResponse {
+    repeated SlotInfo slots = 1;
 }
 
 message PingRequest {}

@@ -20,6 +20,10 @@ struct SharedState
     std::condition_variable cv;
     bool shutdown = false;
 
+    // Non-empty for robots claimed via Join(): SendCommand/SensorStream must
+    // present it. Empty (AddRobot/CLI robots) = unrestricted.
+    std::string token;
+
     // Sensor data (published by the sim thread each frame)
     std::vector<uint8_t> image; // RGB, top-down
     int width = 0;

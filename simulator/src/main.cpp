@@ -13,6 +13,8 @@ static void printUsage(const char* prog)
               << "Options:\n"
               << "  --config-dir <path>          Path to configs directory (default: configs/)\n"
               << "  --port <n>                    gRPC listening port (default: /network/grpc_port)\n"
+              << "  --match <path>                Match config with named slots; programs claim them\n"
+              << "                                 over gRPC (Join). Implies --empty.\n"
               << "  --robot <path>                Add a robot loaded from this config file\n"
               << "                                 (relative to the working directory, not\n"
               << "                                 --config-dir). Repeat for a team --\n"
@@ -43,6 +45,7 @@ int main(int argc, char* argv[])
     bool haveSpawnOverride = false;
     std::array<float, 3> pendingSpawn{0.0f, 0.0f, 0.0f};
     bool startEmpty = false;
+    std::string matchPath;
     int grpcPort = 0; // 0 = keep /network/grpc_port from project.json
 
     for (int i = 1; i < argc; i++) {
@@ -60,6 +63,8 @@ int main(int argc, char* argv[])
             i += 3;
         } else if (std::strcmp(argv[i], "--port") == 0 && i + 1 < argc) {
             grpcPort = std::atoi(argv[++i]);
+        } else if (std::strcmp(argv[i], "--match") == 0 && i + 1 < argc) {
+            matchPath = argv[++i];
         } else if (std::strcmp(argv[i], "--empty") == 0) {
             startEmpty = true;
         } else if (std::strcmp(argv[i], "--help") == 0 || std::strcmp(argv[i], "-h") == 0) {
@@ -70,6 +75,15 @@ int main(int argc, char* argv[])
 
     App app;
     if (!app.init(configDir)) return 1;
+    if (!matchPath.empty()) {
+        try {
+            Config::instance().loadMatch(matchPath);
+        } catch (const std::exception& e) {
+            std::cerr << "[Config] " << e.what() << std::endl;
+            return 1;
+        }
+        startEmpty = true; // match robots join over gRPC
+    }
     if (grpcPort > 0) Config::instance().setGrpcPort(grpcPort);
 
     // "In code" (here, or in any other caller of App::addRobot) is the real

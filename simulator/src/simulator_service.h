@@ -5,6 +5,8 @@
 #include "simulator.pb.h"
 #include <atomic>
 #include <map>
+#include <mutex>
+#include <string>
 #include <shared_mutex>
 
 // gRPC service implementation for robocup::Simulator. Bridges the gRPC handler
@@ -47,7 +49,19 @@ public:
     grpc::Status Shutdown(grpc::ServerContext* context, const robocup::ShutdownRequest* request,
                           robocup::ShutdownResponse* response) override;
 
+    grpc::Status Join(grpc::ServerContext* context, const robocup::JoinRequest* request,
+                      robocup::JoinResponse* response) override;
+
+    grpc::Status ListRobots(grpc::ServerContext* context, const robocup::ListRobotsRequest* request,
+                            robocup::ListRobotsResponse* response) override;
+
 private:
+    // True if `state` is open (no token) or the call's metadata carries its token.
+    static bool authorized(grpc::ServerContext* context, SharedState& state);
+
+    struct SlotClaim { int robotId; std::string token; };
+    std::mutex m_slotsMutex;
+    std::map<std::string, SlotClaim> m_claims; // slot name -> owner
     std::map<int, SharedState>& m_states;
     std::shared_mutex& m_statesMutex;
     AddRobotQueue& m_addRobotQueue;

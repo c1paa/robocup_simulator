@@ -78,3 +78,13 @@ void Config::setGrpcPort(int port)
 {
     m_data["network"]["grpc_port"] = port;
 }
+
+void Config::loadMatch(const std::string& path)
+{
+    std::cout << "[Config] Loading match: " << path << std::endl;
+    std::ifstream f(path);
+    if (!f.is_open()) throw std::runtime_error("Cannot open " + path);
+    json match;
+    f >> match;
+    m_data["match"] = match;
+}
