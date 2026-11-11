@@ -99,6 +99,7 @@ grpc::Status SimulatorServiceImpl::SensorStream(
             lastFrame = state.frameId;
 
             data.set_robot_id(robotId);
+            data.set_game_phase(static_cast<robocup::GamePhase>(m_phase.load()));
             data.set_image_width(state.width);
             data.set_image_height(state.height);
             data.set_image_data(state.image.data(), state.image.size());
@@ -293,5 +294,23 @@ grpc::Status SimulatorServiceImpl::ListRobots(grpc::ServerContext*, const robocu
         info->set_claimed(c != m_claims.end());
         info->set_robot_id(c != m_claims.end() ? c->second.robotId : -1);
     }
+    return grpc::Status::OK;
+}
+
+grpc::Status SimulatorServiceImpl::SetGamePhase(grpc::ServerContext*, const robocup::GamePhaseRequest* request,
+                                                robocup::GamePhaseResponse* response)
+{
+    int want = static_cast<int>(request->phase());
+    int cur = m_phase.load();
+    // Only forward transitions: waiting -> playing -> stopping.
+    if (want > cur) m_phase.store(want);
+    response->set_phase(static_cast<robocup::GamePhase>(m_phase.load()));
+    return grpc::Status::OK;
+}
+
+grpc::Status SimulatorServiceImpl::GetGamePhase(grpc::ServerContext*, const robocup::GetGamePhaseRequest*,
+                                                robocup::GamePhaseResponse* response)
+{
+    response->set_phase(static_cast<robocup::GamePhase>(m_phase.load()));
     return grpc::Status::OK;
 }

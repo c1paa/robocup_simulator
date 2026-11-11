@@ -100,6 +100,7 @@ int main(int argc, char* argv[])
         }
     }
 
+    if (!matchPath.empty()) app.setInitialPhase(0); // match: wait for kickoff
     app.run();
     app.shutdown();
     return 0;

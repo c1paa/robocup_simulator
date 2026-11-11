@@ -22,6 +22,12 @@ service Simulator {
     // Liveness/readiness probe; succeeds once the gRPC server is serving.
     rpc Ping(PingRequest) returns (PingResponse);
 
+    // Match control: start the game (WAITING -> PLAYING) or end it (-> STOPPING,
+    // the simulator then closes after a short grace period so programs can
+    // finish). Also reachable from the window: Enter starts, closing stops.
+    rpc SetGamePhase(GamePhaseRequest) returns (GamePhaseResponse);
+    rpc GetGamePhase(GetGamePhaseRequest) returns (GamePhaseResponse);
+
     // Match mode: claims a named slot from the simulator's --match config,
     // creating that slot's robot (team, spawn, robot config) and returning
     // its robot_id plus a secret token. SendCommand/SensorStream for a
@@ -58,6 +64,20 @@ message SlotInfo {
 message ListRobotsResponse {
     repeated SlotInfo slots = 1;
 }
+
+enum GamePhase {
+    PHASE_WAITING = 0;  // robots may join; commands are held, robots don't move
+    PHASE_PLAYING = 1;  // game on
+    PHASE_STOPPING = 2; // simulator is closing: programs should stop and close()
+}
+
+message GamePhaseRequest {
+    GamePhase phase = 1; // PLAYING = start the game, STOPPING = end it and close
+}
+message GamePhaseResponse {
+    GamePhase phase = 1; // phase after the request
+}
+message GetGamePhaseRequest {}
 
 message PingRequest {}
 message PingResponse { int32 robot_count = 1; }
@@ -168,6 +188,11 @@ message SensorData {
     float imu_gyro_x = 29;
     float imu_gyro_y = 30; // yaw rate; matches angular_velocity above (noisy)
     float imu_gyro_z = 31;
+
+    // Match phase, same for every robot -- see GamePhase. Robot programs poll
+    // this (SimRobotHAL.game_phase()/is_running()) to know when to start
+    // playing and when to clean up and exit.
+    GamePhase game_phase = 32;
 }
 
 message LidarPoint {

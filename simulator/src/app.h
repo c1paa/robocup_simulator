@@ -54,6 +54,10 @@ public:
 
     bool init(const std::string& configDir = "configs/");
     void run();
+
+    // Match phase at startup: 0 = waiting for kickoff (match mode; Enter or
+    // the SetGamePhase RPC starts it), 1 = playing (default, personal mode).
+    void setInitialPhase(int phase);
     void shutdown();
 
     // Constructs a new robot from its own config file (merged on top of the
@@ -94,6 +98,13 @@ private:
     SDL_Window* m_window = nullptr;
     SDL_GLContext m_glContext = nullptr;
     bool m_running = true;
+
+    // Closing is graceful: first phase -> STOPPING so robot programs see it
+    // and exit, then the window closes after kQuitGraceMs (a second close
+    // request forces it immediately).
+    bool m_quitting = false;
+    Uint64 m_quitDeadline = 0;
+    void beginQuit();
     bool m_paused = false;
 
     // Subsystems

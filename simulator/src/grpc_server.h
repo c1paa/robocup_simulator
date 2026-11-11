@@ -51,6 +51,11 @@ public:
     // True once a client called the Shutdown RPC; App::run exits its loop.
     bool shutdownRequested() const { return m_shutdownRequested.load(); }
 
+    // Match phase (values mirror robocup::GamePhase: 0 waiting, 1 playing,
+    // 2 stopping). Commands only take effect while playing.
+    int phase() const { return m_phase.load(); }
+    void setPhase(int p) { m_phase.store(p); }
+
     void setBall(Ball* ball) { m_ball = ball; }
 
     // Registers one robot's subsystems under `id` (matches RobotCommand/
@@ -98,6 +103,7 @@ private:
     AddRobotFn m_addRobotFn;
     AddRobotQueue m_addRobotQueue;
     std::atomic<bool> m_shutdownRequested{false};
+    std::atomic<int> m_phase{1};
 
     std::thread m_thread;
     std::unique_ptr<grpc::Server> m_server;

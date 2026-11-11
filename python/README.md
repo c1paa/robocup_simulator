@@ -231,3 +231,34 @@ script nothing changes: `robot = create_robot()` picks the mode -- match if
 robot = sim.join("red_1")`. A slot can be claimed once; each robot accepts
 commands only from the program holding its token. Closing the window ends all
 programs (KeyboardInterrupt).
+
+## Game phases (when to play, when to stop)
+
+The simulator tells every robot program what phase the match is in:
+
+| phase | meaning | what the robot does |
+|---|---|---|
+| `"waiting"` | robots joined, no kickoff yet (match mode) | commands are held, robot stands still |
+| `"playing"` | game on | normal driving |
+| `"stopping"` | simulator is closing | finish the loop and call `close()` |
+
+Match mode starts in `waiting`; press **Enter** in the simulator window or call
+`sim.start_game()` to kick off. Personal mode (no `ROBOCUP_SIM`) starts directly in
+`playing`. Closing the window (X / Esc), `sim.stop_game()` or Ctrl+C-ing the match
+switch to `stopping` first and the window closes ~1.5 s later, so programs can
+exit cleanly. Standard robot script:
+
+```python
+robot = create_robot()
+try:
+    robot.wait_for_start()          # returns True when the game starts
+    while robot.is_running():       # False on "stopping" or if the simulator is gone
+        ...                         # read sensors, send_velocity(...)
+        time.sleep(0.05)
+finally:
+    robot.close()
+```
+
+Also: `robot.game_phase()`, `robot.is_playing()`. On real hardware the phase is
+always `"playing"`, so the same script runs unchanged. A script that simply
+ends (no loop) leaves its robot standing in the simulator -- it is not removed.

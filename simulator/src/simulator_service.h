@@ -19,9 +19,9 @@ class SimulatorServiceImpl final : public robocup::Simulator::Service
 {
 public:
     SimulatorServiceImpl(std::map<int, SharedState>& states, std::shared_mutex& statesMutex,
-                          AddRobotQueue& addRobotQueue, std::atomic<bool>& shutdownFlag)
+                          AddRobotQueue& addRobotQueue, std::atomic<bool>& shutdownFlag, std::atomic<int>& phase)
         : m_states(states), m_statesMutex(statesMutex), m_addRobotQueue(addRobotQueue),
-          m_shutdownFlag(shutdownFlag) {}
+          m_shutdownFlag(shutdownFlag), m_phase(phase) {}
 
     // Client-streaming: apply each command to its robot_id's pending-command slot.
     grpc::Status SendCommand(grpc::ServerContext* context,
@@ -55,6 +55,11 @@ public:
     grpc::Status ListRobots(grpc::ServerContext* context, const robocup::ListRobotsRequest* request,
                             robocup::ListRobotsResponse* response) override;
 
+    grpc::Status SetGamePhase(grpc::ServerContext* context, const robocup::GamePhaseRequest* request,
+                              robocup::GamePhaseResponse* response) override;
+    grpc::Status GetGamePhase(grpc::ServerContext* context, const robocup::GetGamePhaseRequest* request,
+                              robocup::GamePhaseResponse* response) override;
+
 private:
     // True if `state` is open (no token) or the call's metadata carries its token.
     static bool authorized(grpc::ServerContext* context, SharedState& state);
@@ -66,4 +71,5 @@ private:
     std::shared_mutex& m_statesMutex;
     AddRobotQueue& m_addRobotQueue;
     std::atomic<bool>& m_shutdownFlag;
+    std::atomic<int>& m_phase;
 };

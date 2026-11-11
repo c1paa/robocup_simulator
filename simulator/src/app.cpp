@@ -218,6 +218,24 @@ bool App::initGL()
     return true;
 }
 
+void App::setInitialPhase(int phase)
+{
+    if (m_grpc) m_grpc->setPhase(phase);
+    if (phase == 0) {
+        std::cout << "[Match] Waiting for robots -- press Enter in the window to start the game." << std::endl;
+    }
+}
+
+void App::beginQuit()
+{
+    if (m_quitting) return;
+    m_quitting = true;
+    static constexpr Uint64 kQuitGraceMs = 1500;
+    m_quitDeadline = SDL_GetTicks64() + kQuitGraceMs;
+    m_grpc->setPhase(2);
+    std::cout << "[Match] Stopping: telling robot programs to finish..." << std::endl;
+}
+
 void App::run()
 {
     // Finalize the robot registry and start serving now that the caller has
@@ -243,6 +261,10 @@ void App::run()
         const Uint8* keys = SDL_GetKeyboardState(nullptr);
         handleKeyboardInput(keys, dt);
 
+        if (m_grpc->shutdownRequested()) m_running = false; // hard stop (Shutdown RPC)
+        if (m_grpc->phase() == 2) beginQuit();              // SetGamePhase(STOPPING) from a client
+        if (m_quitting && SDL_GetTicks64() >= m_quitDeadline) m_running = false;
+
         // --- Smooth camera damping (always, even when paused) ---
         float damping = std::exp(-m_damping * dt);
 
@@ -262,7 +284,6 @@ void App::run()
 
         // Always, even when paused, so AddRobot RPCs never block on a pause.
         m_grpc->processPending();
-        if (m_grpc->shutdownRequested()) m_running = false;
 
         if (!m_paused) {
             update(dt * m_simulationSpeed);
@@ -277,7 +298,8 @@ void App::handleEvent(const SDL_Event& e)
 {
     switch (e.type) {
     case SDL_QUIT:
-        m_running = false;
+        if (m_quitting) m_running = false; // second close request: don't wait
+        else beginQuit();
         break;
     case SDL_WINDOWEVENT:
         if (e.window.event == SDL_WINDOWEVENT_RESIZED) {
@@ -363,8 +385,10 @@ void App::handleEvent(const SDL_Event& e)
 
 void App::handleKeyboardInput(const Uint8* keys, float dt)
 {
-    if (keys[SDL_SCANCODE_ESCAPE]) {
-        m_running = false;
+    if (keys[SDL_SCANCODE_ESCAPE]) beginQuit();
+    if (keys[SDL_SCANCODE_RETURN] && m_grpc->phase() == 0) {
+        m_grpc->setPhase(1);
+        std::cout << "[Match] Game started." << std::endl;
     }
 
     // WASD to pan the look target in camera plane

@@ -282,6 +282,21 @@ class Simulator:
             threading.Thread(target=sim._watch_remote, daemon=True).start()
         return sim
 
+    def start_game(self):
+        """Match mode: gives the kickoff (waiting -> playing). Same as Enter in the window."""
+        self._client._stub.SetGamePhase(
+            simulator_pb2.GamePhaseRequest(phase=simulator_pb2.PHASE_PLAYING), timeout=5.0)
+
+    def stop_game(self):
+        """Tells every program the game is over ("stopping"); the simulator
+        window closes ~1.5 s later so they can call close()."""
+        self._client._stub.SetGamePhase(
+            simulator_pb2.GamePhaseRequest(phase=simulator_pb2.PHASE_STOPPING), timeout=5.0)
+
+    def game_phase(self):
+        r = self._client._stub.GetGamePhase(simulator_pb2.GetGamePhaseRequest(), timeout=5.0)
+        return SimRobotHAL._PHASES.get(int(r.phase), "waiting")
+
     def join(self, slot, token=None):
         """Claims match slot `slot` and returns a connected SimRobotHAL
         playing as that slot (see simulator/configs/match.json)."""
@@ -436,6 +451,40 @@ class RobotHAL(abc.ABC):
     @abc.abstractmethod
     def close(self): ...
 
+    # ---- game flow ----
+    # The simulator announces a phase to every robot program: "waiting"
+    # (robots joined, kickoff not given -- commands are held), "playing", or
+    # "stopping" (the simulator is closing: finish up and call close()).
+    # Standard robot loop:
+    #     robot.wait_for_start()
+    #     while robot.is_running():
+    #         ...
+    #     robot.close()
+    @abc.abstractmethod
+    def game_phase(self): ...
+
+    def is_playing(self):
+        return self.game_phase() == "playing"
+
+    def is_running(self):
+        """False once the simulator is stopping/gone or close() was called --
+        the signal for your main loop to end."""
+        return self.game_phase() != "stopping"
+
+    def wait_for_start(self, timeout=None):
+        """Blocks until the game is on. Returns True when playing, False if
+        the game ended first or `timeout` seconds passed."""
+        deadline = None if timeout is None else time.time() + timeout
+        while True:
+            phase = self.game_phase()
+            if phase == "playing":
+                return True
+            if phase == "stopping":
+                return False
+            if deadline is not None and time.time() > deadline:
+                return False
+            time.sleep(0.05)
+
     @abc.abstractmethod
     def get_camera_frame(self): ...
     @abc.abstractmethod
@@ -484,6 +533,10 @@ class HardwareRobotHAL(RobotHAL):
     controller, camera, IMU, ...) -- the signatures and return formats are
     the ones documented on SimRobotHAL."""
 
+    def game_phase(self):
+        # No referee on the real robot: it is always "playing".
+        return "playing"
+
     def _todo(self, *a, **k):
         raise NotImplementedError("HardwareRobotHAL: real-robot driver not written yet")
 
@@ -510,6 +563,7 @@ class SimRobotHAL(RobotHAL):
         self._metadata = (("x-robot-token", token),) if token else None
         self._owner = _owner        # Simulator to stop when this HAL closes (personal mode)
         self._stream_error = None
+        self._stream_ended = False
         self._channel = grpc.insecure_channel(f"{host}:{port}")
         self._stub = simulator_pb2_grpc.SimulatorStub(self._channel)
 
@@ -588,6 +642,18 @@ class SimRobotHAL(RobotHAL):
             pass
         if self._owner is not None:
             self._owner.stop()
+
+    _PHASES = {0: "waiting", 1: "playing", 2: "stopping"}
+
+    def game_phase(self):
+        """"waiting" | "playing" | "stopping" -- see RobotHAL. Reports
+        "stopping" once the simulator is gone or this HAL was closed."""
+        if self._closed or self._stream_ended:
+            return "stopping"
+        data = self._latest_data()
+        if data is None:
+            return "waiting"
+        return self._PHASES.get(int(data.game_phase), "waiting")
 
     # ---- sensor accessors ----
 
@@ -779,6 +845,7 @@ class SimRobotHAL(RobotHAL):
         except grpc.RpcError as e:
             if e.code() == grpc.StatusCode.PERMISSION_DENIED:
                 self._stream_error = e
+        self._stream_ended = True  # simulator went away (or we closed)
 
     def _command_generator(self):
         while True:

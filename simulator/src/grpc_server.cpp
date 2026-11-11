@@ -49,7 +49,7 @@ void GrpcServer::start()
     grpc::ServerBuilder builder;
     builder.AddListeningPort(addr, grpc::InsecureServerCredentials());
 
-    m_service = std::make_unique<SimulatorServiceImpl>(m_states, m_statesMutex, m_addRobotQueue, m_shutdownRequested);
+    m_service = std::make_unique<SimulatorServiceImpl>(m_states, m_statesMutex, m_addRobotQueue, m_shutdownRequested, m_phase);
     builder.RegisterService(m_service.get());
 
     m_server = builder.BuildAndStart();
@@ -168,7 +168,16 @@ void GrpcServer::update(float dt)
         // thread.
         {
             std::lock_guard<std::mutex> lock(state.mtx);
-            if (state.hasCommand) {
+            if (m_phase.load() != 1 /* playing */) {
+                // Not playing (waiting for kickoff / closing): hold the robot
+                // still, but keep the pending command so it applies at start.
+                if (binding.robot)    binding.robot->setBodyVelocity(0.0f, 0.0f, 0.0f);
+                if (binding.kicker) {
+                    binding.kicker->setCapacitorOpen(false);
+                    binding.kicker->setKickerOpen(false);
+                }
+                if (binding.dribbler) binding.dribbler->setTargetSpeed(0.0f);
+            } else if (state.hasCommand) {
                 if (binding.robot) {
                     binding.robot->setBodyVelocity(state.vx, state.vy, state.omega);
                 }
