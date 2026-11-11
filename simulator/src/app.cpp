@@ -327,7 +327,7 @@ void App::handleEvent(const SDL_Event& e)
     case SDL_MOUSEMOTION:
         if (e.motion.state & SDL_BUTTON(SDL_BUTTON_RIGHT)) {
             m_orbitVelocity.x -= e.motion.xrel * m_orbitSensitivity * 0.15f;
-            m_orbitVelocity.y += e.motion.yrel * m_orbitSensitivity * 0.15f;
+            m_orbitVelocity.y -= e.motion.yrel * m_orbitSensitivity * 0.15f;
         }
         break;
 
@@ -347,12 +347,14 @@ void App::handleEvent(const SDL_Event& e)
             m_zoomVelocity -= sy * m_zoomSensitivity;
         } else if (shift) {
             m_orbitVelocity.x -= sx * m_orbitSensitivity;
-            m_orbitVelocity.y += sy * m_orbitSensitivity;
+            m_orbitVelocity.y -= sy * m_orbitSensitivity;
         } else {
             // Pan speed scales with distance: close = slow, far = fast
             float distScale = m_cameraDistance / 5.0f;
-            m_panVelocity += cameraRight() * sx * m_panSensitivity * distScale
-                          +  glm::cross(cameraRight(), cameraForward()) * sy * m_panSensitivity * distScale;
+            // Ground-plane pan (the orbit pivot must stay on the floor): the old
+            // cross(right, forward) term was vertical, so vertical scrolling
+            // lifted/sank the pivot instead of moving it forward/back.
+            m_panVelocity += (cameraForward() * sy - cameraRight() * sx) * m_panSensitivity * distScale;
         }
         break;
     }
@@ -572,8 +574,10 @@ glm::vec3 App::cameraPosition() const
 
 glm::vec3 App::cameraRight() const
 {
+    // Screen-right on the ground plane (forward x up). The old
+    // cross(camera - target, up) pointed to screen-LEFT.
     return glm::normalize(glm::cross(
-        cameraPosition() - m_lookTarget,
+        m_lookTarget - cameraPosition(),
         glm::vec3(0.0f, 1.0f, 0.0f)
     ));
 }
