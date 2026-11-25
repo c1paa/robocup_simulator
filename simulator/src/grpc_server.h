@@ -52,7 +52,7 @@ public:
     bool shutdownRequested() const { return m_shutdownRequested.load(); }
 
     // Match phase (values mirror robocup::GamePhase: 0 waiting, 1 playing,
-    // 2 stopping). Commands only take effect while playing.
+    // 2 stopping, 3 paused). Commands only take effect while playing.
     int phase() const { return m_phase.load(); }
     void setPhase(int p) { m_phase.store(p); }
 
@@ -74,6 +74,12 @@ public:
     using AddRobotFn = std::function<int(const std::string& configPath,
                                           float spawnX, float spawnZ, float spawnYawDeg)>;
     void setAddRobotHandler(AddRobotFn fn) { m_addRobotFn = std::move(fn); }
+
+    // Removes robot `id` from the field (its program disconnected). Set by App.
+    using RemoveRobotFn = std::function<void(int id)>;
+    void setRemoveRobotHandler(RemoveRobotFn fn) { m_removeRobotFn = std::move(fn); }
+    // Drops id's binding + marks its SharedState dead. Main thread only.
+    void unregisterRobot(int id);
 
     // Producer side used by SimulatorServiceImpl's constructor -- exposes the
     // same queue drained in update() below.
@@ -101,6 +107,7 @@ private:
     Ball* m_ball = nullptr;
 
     AddRobotFn m_addRobotFn;
+    RemoveRobotFn m_removeRobotFn;
     AddRobotQueue m_addRobotQueue;
     std::atomic<bool> m_shutdownRequested{false};
     std::atomic<int> m_phase{1};

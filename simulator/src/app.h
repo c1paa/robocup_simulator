@@ -79,6 +79,9 @@ public:
     // Never call this directly from any other thread. Returns the new
     // robot's id (its RobotCommand/SensorRequest.robot_id), assigned in
     // call order starting at 0.
+    // Takes robot `id` off the field (its program disconnected). Main thread only.
+    void removeRobot(int id);
+
     int addRobot(const std::string& robotConfigPath,
                  float spawnX = 0.0f, float spawnZ = 0.0f, float spawnYawDeg = 0.0f);
 
@@ -121,6 +124,7 @@ private:
     // unique_ptr members hold, which stay valid even if the vector itself
     // reallocates when a later addRobot() grows it.
     std::vector<RobotEntry> m_robots;
+    int m_nextRobotId = 0; // ids are never reused, even after removeRobot()
 
     // Which m_robots[] index the keyboard (arrows/space/F) currently drives,
     // selected with the 1/2/3/4 keys (see handleEvent). Only meaningful when

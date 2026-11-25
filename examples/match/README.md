@@ -1,13 +1,14 @@
 # Match example
 
-Terminal 1 -- the simulator, empty, with the slots from `simulator/configs/match.json`:
+Terminal 1 -- the empty simulator (slots from `simulator/configs/match.json`), phase "waiting":
 
-    ./run_simulator.sh --match simulator/configs/match.json
+    ./run_simulator.sh
 
-Terminals 2..N -- one robot program each (any scripts; here the same one):
+Terminals 2..5 -- the same script, different ID (0 red_1, 1 red_2, 2 blue_1, 3 blue_2):
 
-    ROBOCUP_SIM=localhost:50051 ROBOCUP_SLOT=red_1  python examples/main.py
-    ROBOCUP_SIM=localhost:50051 ROBOCUP_SLOT=blue_1 python examples/main.py
+    python examples/main.py ID=0
+    python examples/main.py ID=2
 
-Each program only controls its own slot's robot (token-protected). The same
-script without those variables opens its own personal simulator instead.
+Press **P** in the simulator window to start / pause / resume. Closing the window
+stops every program; a program that ends removes its robot from the field.
+Without `ID=` the same script opens its own personal simulator.

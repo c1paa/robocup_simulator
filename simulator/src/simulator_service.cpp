@@ -92,9 +92,13 @@ grpc::Status SimulatorServiceImpl::SensorStream(
         robocup::SensorData data;
         {
             std::unique_lock<std::mutex> lock(state.mtx);
-            state.cv.wait(lock, [&] {
-                return state.shutdown || state.frameId != lastFrame;
-            });
+            // Timed wait so a vanished client (cancelled stream) is noticed
+            // even when no new frame is being published.
+            if (!state.cv.wait_for(lock, std::chrono::milliseconds(250), [&] {
+                    return state.shutdown || state.frameId != lastFrame;
+                })) {
+                continue;
+            }
             if (state.shutdown) break;
             lastFrame = state.frameId;
 
@@ -137,6 +141,25 @@ grpc::Status SimulatorServiceImpl::SensorStream(
             }
         }
         if (!writer->Write(data)) break;
+    }
+
+    // A match robot whose program went away (closed, crashed, killed) leaves
+    // the field and frees its slot. Not when the whole simulator is closing.
+    bool simClosing, claimedRobot;
+    {
+        std::lock_guard<std::mutex> lock(state.mtx);
+        simClosing = state.shutdown;
+        claimedRobot = !state.token.empty();
+    }
+    if (claimedRobot && !simClosing && !m_shutdownFlag.load() && m_phase.load() != 2) {
+        {
+            std::lock_guard<std::mutex> lock(m_slotsMutex);
+            for (auto it = m_claims.begin(); it != m_claims.end(); ++it) {
+                if (it->second.robotId == robotId) { m_claims.erase(it); break; }
+            }
+        }
+        std::lock_guard<std::mutex> lock(m_addRobotQueue.mtx);
+        m_addRobotQueue.removals.push_back(robotId);
     }
 
     return grpc::Status::OK;
@@ -207,7 +230,16 @@ grpc::Status SimulatorServiceImpl::Join(grpc::ServerContext* context,
         return fail("simulator was not started with --match <config>");
     }
     const json& slots = root["match"]["slots"];
-    const std::string& slot = request->slot();
+    std::string slot = request->slot();
+    if (!slots.contains(slot)) {
+        // A number selects the slot whose "id" field matches (python main.py ID=2).
+        for (auto it = slots.begin(); it != slots.end(); ++it) {
+            if (it.value().contains("id") && std::to_string(it.value()["id"].get<int>()) == slot) {
+                slot = it.key();
+                break;
+            }
+        }
+    }
     if (!slots.contains(slot)) {
         std::string known;
         for (auto it = slots.begin(); it != slots.end(); ++it) known += (known.empty() ? "" : ", ") + it.key();
@@ -302,8 +334,8 @@ grpc::Status SimulatorServiceImpl::SetGamePhase(grpc::ServerContext*, const robo
 {
     int want = static_cast<int>(request->phase());
     int cur = m_phase.load();
-    // Only forward transitions: waiting -> playing -> stopping.
-    if (want > cur) m_phase.store(want);
+    // waiting/playing/paused can be switched freely; stopping is final.
+    if (cur != 2 && want >= 0 && want <= 3) m_phase.store(want);
     response->set_phase(static_cast<robocup::GamePhase>(m_phase.load()));
     return grpc::Status::OK;
 }

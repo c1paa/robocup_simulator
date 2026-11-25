@@ -184,6 +184,25 @@ _SIM_DIR = os.path.join(_REPO_ROOT, "simulator")
 DEFAULT_ROBOT_CONFIG = os.path.join(_SIM_DIR, "configs", "robot.json")
 
 
+_script_failed = False
+
+
+def _install_failure_hook():
+    """Remember that the script died with an exception, so personal mode closes
+    the window right away instead of waiting for you to do it."""
+    previous = sys.excepthook
+
+    def hook(exc_type, exc, tb):
+        global _script_failed
+        _script_failed = True
+        previous(exc_type, exc, tb)
+
+    sys.excepthook = hook
+
+
+_install_failure_hook()
+
+
 def _free_port():
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(("127.0.0.1", 0))
@@ -210,6 +229,7 @@ class Simulator:
 
     def __init__(self, port=None, build_if_missing=True, host="localhost", exit_on_close=True):
         self._attached = False
+        self._holding = False
         self._exit_on_close = exit_on_close
         self._stopping = False
         self._host = host
@@ -242,6 +262,7 @@ class Simulator:
             cwd=_REPO_ROOT)
         atexit.register(self.stop)
         self._stopping = False
+        atexit.register(self._hold_on_exit)  # runs before stop(): LIFO
 
         self._client = SimulatorClient(self._host, self._port)
         deadline = time.time() + timeout
@@ -311,10 +332,17 @@ class Simulator:
         once the simulator stops answering."""
         misses = 0
         while not self._stopping:
-            time.sleep(1.0)
+            time.sleep(0.5)
             try:
                 self._client._stub.Ping(simulator_pb2.PingRequest(), timeout=1.0)
                 misses = 0
+                if self.game_phase() == "stopping":
+                    # Grace for scripts that watch is_running() and finish by
+                    # themselves; otherwise end the script (KeyboardInterrupt).
+                    time.sleep(0.7)
+                    if not self._stopping:
+                        self._interrupt_main("simulator is closing")
+                    return
             except grpc.RpcError:
                 misses += 1
                 if misses >= 2 and not self._stopping:
@@ -337,9 +365,25 @@ class Simulator:
         """If the user closes the window, interrupt the script's main thread
         (KeyboardInterrupt, so `finally:`/`with` cleanup still runs)."""
         proc.wait()
-        if self._stopping:
+        if self._stopping or self._holding:
             return
         self._interrupt_main("window closed")
+
+    def _hold_on_exit(self):
+        """Personal mode: the script ended without robot.close() -- the robot
+        keeps playing and the window stays until you close it (X / Esc /
+        Ctrl+C), exactly as if close() had never been needed."""
+        if self._proc is None or self._stopping or _script_failed:
+            return
+        if self._proc.poll() is not None:
+            return
+        self._holding = True
+        print("[Simulator] script finished; the simulator keeps running -- close the window to exit.")
+        try:
+            while self._proc.poll() is None:
+                time.sleep(0.2)
+        except KeyboardInterrupt:
+            pass
 
     def _interrupt_main(self, why):
         print(f"[Simulator] {why}, stopping the script.")
@@ -405,12 +449,25 @@ class Simulator:
         self.stop()
 
 
+def _slot_from_argv():
+    """`python main.py ID=2` (or `--id 2`) picks the match slot by number."""
+    argv = sys.argv[1:]
+    for i, a in enumerate(argv):
+        if a.lower().startswith("id="):
+            return a[3:]
+        if a.lower() in ("--id", "-id") and i + 1 < len(argv):
+            return argv[i + 1]
+    return None
+
+
 def create_robot(sim=None, slot=None, **add_robot_kwargs):
     """The one call robot scripts need; picks the mode itself:
 
       ROBOT_BACKEND=hw                  -> HardwareRobotHAL (real robot)
-      ROBOCUP_SIM=host:port + a slot    -> joins a match on a simulator that is
-        (ROBOCUP_SLOT or slot=)            already running, playing as that slot
+      `python main.py ID=0..3` (or         -> joins the empty simulator already running
+      ROBOCUP_SLOT / slot=; address         (./run_simulator.sh), playing as that
+      ROBOCUP_SIM=host:port, default        slot; the robot leaves the field when
+      localhost:50051)                      the program ends
       otherwise                         -> personal mode: launches its own
                                            simulator with only this robot
 
@@ -421,14 +478,15 @@ def create_robot(sim=None, slot=None, **add_robot_kwargs):
     if sim is not None:
         return sim.add_robot(**add_robot_kwargs)
     addr = os.environ.get("ROBOCUP_SIM")
-    slot = slot or os.environ.get("ROBOCUP_SLOT")
-    if addr:
+    slot = slot or os.environ.get("ROBOCUP_SLOT") or _slot_from_argv()
+    if addr or slot:
         if not slot:
-            raise ValueError("ROBOCUP_SIM is set but no slot: set ROBOCUP_SLOT or pass slot=")
-        host, _, port = addr.rpartition(":")
+            raise ValueError("ROBOCUP_SIM is set but no slot: pass ID=<n> or set ROBOCUP_SLOT")
+        host, _, port = (addr or "localhost:50051").rpartition(":")
         sim = Simulator.connect(host or "localhost", int(port))
         hal = sim.join(slot)
         hal._owner = sim
+        atexit.register(hal.close)  # script ended without close(): the robot leaves the field
         return hal
     sim = Simulator().start()
     hal = sim.add_robot(**add_robot_kwargs)
@@ -643,7 +701,7 @@ class SimRobotHAL(RobotHAL):
         if self._owner is not None:
             self._owner.stop()
 
-    _PHASES = {0: "waiting", 1: "playing", 2: "stopping"}
+    _PHASES = {0: "waiting", 1: "playing", 2: "stopping", 3: "paused"}
 
     def game_phase(self):
         """"waiting" | "playing" | "stopping" -- see RobotHAL. Reports

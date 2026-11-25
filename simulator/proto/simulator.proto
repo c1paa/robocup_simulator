@@ -69,6 +69,7 @@ enum GamePhase {
     PHASE_WAITING = 0;  // robots may join; commands are held, robots don't move
     PHASE_PLAYING = 1;  // game on
     PHASE_STOPPING = 2; // simulator is closing: programs should stop and close()
+    PHASE_PAUSED = 3;   // game paused with P: world frozen, commands held; P resumes
 }
 
 message GamePhaseRequest {

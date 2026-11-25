@@ -14,4 +14,9 @@ if [ ! -f "$EXE" ]; then
     exit 1
 fi
 
+# No arguments: an empty field in "waiting" for programs to join (python main.py ID=0..3).
+if [ $# -eq 0 ]; then
+    set -- --match "$SIM_DIR/configs/match.json"
+fi
+
 exec "$EXE" --config-dir "$SIM_DIR/configs" "$@"

@@ -41,6 +41,24 @@ void GrpcServer::registerRobot(int id, Robot* robot, Camera* camera, LidarSensor
     m_states[id]; // default-construct this robot's SharedState in place
 }
 
+void GrpcServer::unregisterRobot(int id)
+{
+    m_bindings.erase(id);
+    SharedState* statePtr = nullptr;
+    {
+        std::shared_lock<std::shared_mutex> lock(m_statesMutex);
+        auto it = m_states.find(id);
+        if (it != m_states.end()) statePtr = &it->second;
+    }
+    if (statePtr) {
+        std::lock_guard<std::mutex> lock(statePtr->mtx);
+        statePtr->shutdown = true;           // ends any SensorStream still on it
+        statePtr->image.clear();
+        statePtr->image.shrink_to_fit();
+        statePtr->cv.notify_all();
+    }
+}
+
 void GrpcServer::start()
 {
     int port = Config::instance().getInt("/network/grpc_port", 50051);
@@ -106,6 +124,17 @@ void GrpcServer::stop()
 
 void GrpcServer::processPending()
 {
+    // Programs that disconnected: take their robots off the field.
+    {
+        std::vector<int> removals;
+        {
+            std::lock_guard<std::mutex> lock(m_addRobotQueue.mtx);
+            removals.swap(m_addRobotQueue.removals);
+        }
+        for (int id : removals) {
+            if (m_removeRobotFn) m_removeRobotFn(id);
+        }
+    }
     // Drain runtime AddRobot requests, before update()'s per-robot loop runs
     // -- robot construction (Bullet body, camera FBOs) touches Bullet/GL and
     // must happen here on the main/sim thread, not on the gRPC handler
@@ -169,8 +198,9 @@ void GrpcServer::update(float dt)
         {
             std::lock_guard<std::mutex> lock(state.mtx);
             if (m_phase.load() != 1 /* playing */) {
-                // Not playing (waiting for kickoff / closing): hold the robot
-                // still, but keep the pending command so it applies at start.
+                // Not playing (waiting / paused / closing): hold the robot
+                // still, but keep the last command so it applies on resume.
+                state.hasCommand = true;
                 if (binding.robot)    binding.robot->setBodyVelocity(0.0f, 0.0f, 0.0f);
                 if (binding.kicker) {
                     binding.kicker->setCapacitorOpen(false);

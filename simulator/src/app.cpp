@@ -89,6 +89,8 @@ bool App::init(const std::string& configDir)
         return addRobot(path, x, z, yawDeg);
     });
 
+    m_grpc->setRemoveRobotHandler([this](int id) { removeRobot(id); });
+
     std::cout << "[App] Simulator ready (field empty -- call addRobot() to add robots)." << std::endl;
     return true;
 }
@@ -100,7 +102,7 @@ int App::addRobot(const std::string& robotConfigPath, float spawnX, float spawnZ
         return -1;
     }
 
-    int id = (int)m_robots.size();
+    int id = m_nextRobotId++;
 
     RobotEntry entry;
     entry.id = id;
@@ -143,6 +145,19 @@ int App::addRobot(const std::string& robotConfigPath, float spawnX, float spawnZ
     m_robots.push_back(std::move(entry));
     std::cout << "[App] Robot " << id << " added from " << robotConfigPath << std::endl;
     return id;
+}
+
+void App::removeRobot(int id)
+{
+    for (size_t i = 0; i < m_robots.size(); ++i) {
+        if (m_robots[i].id != id) continue;
+        if (m_grpc) m_grpc->unregisterRobot(id);
+        if (m_robots[i].camera) m_robots[i].camera->shutdown();
+        m_robots.erase(m_robots.begin() + i);
+        if (m_activeRobot >= (int)m_robots.size()) m_activeRobot = m_robots.empty() ? 0 : (int)m_robots.size() - 1;
+        std::cout << "[App] Robot " << id << " removed (program disconnected)." << std::endl;
+        return;
+    }
 }
 
 void App::shutdown()
@@ -222,7 +237,7 @@ void App::setInitialPhase(int phase)
 {
     if (m_grpc) m_grpc->setPhase(phase);
     if (phase == 0) {
-        std::cout << "[Match] Waiting for robots -- press Enter in the window to start the game." << std::endl;
+        std::cout << "[Match] Waiting for robots -- press P in the window to start the game." << std::endl;
     }
 }
 
@@ -318,6 +333,11 @@ void App::handleEvent(const SDL_Event& e)
             e.key.keysym.scancode == SDL_SCANCODE_RGUI) {
             m_cmdHeld = true;
         }
+        if (e.key.keysym.scancode == SDL_SCANCODE_P && !e.key.repeat) {
+            int ph = m_grpc->phase();
+            if (ph == 1) { m_grpc->setPhase(3); std::cout << "[Match] Paused (P to resume)." << std::endl; }
+            else if (ph == 0 || ph == 3) { m_grpc->setPhase(1); std::cout << "[Match] Playing." << std::endl; }
+        }
         if (e.key.keysym.scancode == SDL_SCANCODE_C) {
             m_showCameraPreview = !m_showCameraPreview;
         }
@@ -386,10 +406,6 @@ void App::handleEvent(const SDL_Event& e)
 void App::handleKeyboardInput(const Uint8* keys, float dt)
 {
     if (keys[SDL_SCANCODE_ESCAPE]) beginQuit();
-    if (keys[SDL_SCANCODE_RETURN] && m_grpc->phase() == 0) {
-        m_grpc->setPhase(1);
-        std::cout << "[Match] Game started." << std::endl;
-    }
 
     // WASD to pan the look target in camera plane
     float speed = 5.0f * dt;
@@ -462,19 +478,23 @@ void App::update(float dt)
     // Robot::applyDriveForces runs before the step. All robots share one
     // physics step (one world), so this loop runs for every robot before the
     // single m_physics->step(dt) call below.
-    for (auto& entry : m_robots) {
-        entry.dribbler->update(*entry.robot, *m_ball, dt);
-        entry.kicker->update(dt);
-        entry.robot->applyDriveForces(dt);
-    }
-    m_physics->step(dt);
-    for (auto& entry : m_robots) {
-        entry.robot->syncFromPhysics();
-    }
-    m_ball->syncFromPhysics();
-    for (auto& entry : m_robots) {
-        entry.lidar->update(entry.robot->position(), entry.robot->orientation(), dt);
-        entry.imu->update(*entry.robot, dt);
+    // Paused with P (phase 3): the world is frozen, but sensors/phase are still
+    // published (m_grpc->update) so programs keep seeing the phase and can resume.
+    if (m_grpc->phase() != 3) {
+        for (auto& entry : m_robots) {
+            entry.dribbler->update(*entry.robot, *m_ball, dt);
+            entry.kicker->update(dt);
+            entry.robot->applyDriveForces(dt);
+        }
+        m_physics->step(dt);
+        for (auto& entry : m_robots) {
+            entry.robot->syncFromPhysics();
+        }
+        m_ball->syncFromPhysics();
+        for (auto& entry : m_robots) {
+            entry.lidar->update(entry.robot->position(), entry.robot->orientation(), dt);
+            entry.imu->update(*entry.robot, dt);
+        }
     }
     m_grpc->update(dt);
 }

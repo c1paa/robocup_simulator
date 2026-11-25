@@ -214,44 +214,49 @@ By default (`Simulator(exit_on_close=True)`) closing the simulator window
 `with` cleanup runs. Use `sim.is_running()` in a loop instead if you prefer
 (`Simulator(exit_on_close=False)`).
 
-## Match mode (several robots, one program each)
+## Two ways to run the same script
 
-Start one simulator and let every robot program join it by slot name:
+**Personal** -- `python main.py`. `create_robot()` opens its own window with only
+your robot. The robot plays until you call `robot.close()` or close the window
+(X). Without `close()` the script may simply end: the robot keeps going and the
+window stays open until you close it.
+
+**Match** -- several programs, one field, one machine:
 
 ```
-./run_simulator.sh --match simulator/configs/match.json     # terminal 1
-ROBOCUP_SIM=localhost:50051 ROBOCUP_SLOT=red_1 python my_robot.py    # terminal 2
-ROBOCUP_SIM=localhost:50051 ROBOCUP_SLOT=blue_1 python other_bot.py  # terminal 3
+./run_simulator.sh                 # terminal 1: empty field, phase "waiting"
+python main.py ID=0                # terminal 2: the same unchanged script
+python main.py ID=2                # terminal 3
 ```
 
-`match.json` defines the slots (team, robot config, spawn in mm). Inside the
-script nothing changes: `robot = create_robot()` picks the mode -- match if
-`ROBOCUP_SIM` is set, a personal simulator otherwise, hardware with
-`ROBOT_BACKEND=hw`. Explicit form: `sim = Simulator.connect("localhost", 50051);
-robot = sim.join("red_1")`. A slot can be claimed once; each robot accepts
-commands only from the program holding its token. Closing the window ends all
-programs (KeyboardInterrupt).
+`ID` picks the slot from `simulator/configs/match.json` (0 red_1, 1 red_2,
+2 blue_1, 3 blue_2; team, robot config and spawn are defined there; slot names
+work too: `ID=red_1`). `create_robot()` joins the running simulator instead of
+opening one; `robot.close()` is the same call. When a program ends (close(),
+crash, Ctrl+C) its robot disappears from the field and the slot is free again.
+Each robot accepts commands only from the program that joined it. Explicit form:
+`Simulator.connect("localhost", 50051).join("red_1")`; another machine:
+`ROBOCUP_SIM=host:port`.
 
-## Game phases (when to play, when to stop)
-
-The simulator tells every robot program what phase the match is in:
+## Game phases (match controls)
 
 | phase | meaning | what the robot does |
 |---|---|---|
-| `"waiting"` | robots joined, no kickoff yet (match mode) | commands are held, robot stands still |
+| `"waiting"` | initial; robots connect | commands held, robot stands still |
 | `"playing"` | game on | normal driving |
-| `"stopping"` | simulator is closing | finish the loop and call `close()` |
+| `"paused"` | paused | world frozen, commands held |
+| `"stopping"` | simulator closing | finish up and `close()` |
 
-Match mode starts in `waiting`; press **Enter** in the simulator window or call
-`sim.start_game()` to kick off. Personal mode (no `ROBOCUP_SIM`) starts directly in
-`playing`. Closing the window (X / Esc), `sim.stop_game()` or Ctrl+C-ing the match
-switch to `stopping` first and the window closes ~1.5 s later, so programs can
-exit cleanly. Standard robot script:
+In the simulator window: **P** starts the game, pauses and resumes it. Closing the
+window (X / Esc) sends `"stopping"` to all programs; the window closes ~1.5 s later
+and programs that did not finish by themselves are ended (KeyboardInterrupt).
+Python: `sim.start_game()`, `sim.stop_game()`. Personal mode starts directly in
+`playing`. Optional loop for scripts that want to react:
 
 ```python
 robot = create_robot()
 try:
-    robot.wait_for_start()          # returns True when the game starts
+    robot.wait_for_start()          # True when the game starts
     while robot.is_running():       # False on "stopping" or if the simulator is gone
         ...                         # read sensors, send_velocity(...)
         time.sleep(0.05)
@@ -259,6 +264,5 @@ finally:
     robot.close()
 ```
 
-Also: `robot.game_phase()`, `robot.is_playing()`. On real hardware the phase is
-always `"playing"`, so the same script runs unchanged. A script that simply
-ends (no loop) leaves its robot standing in the simulator -- it is not removed.
+Also `robot.game_phase()`, `robot.is_playing()`. On real hardware the phase is always
+`"playing"`, so the same script runs unchanged.

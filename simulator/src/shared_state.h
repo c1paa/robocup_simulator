@@ -98,4 +98,7 @@ struct AddRobotQueue
 {
     std::mutex mtx;
     std::deque<std::shared_ptr<PendingAddRobot>> pending;
+    // Robot ids whose client program went away (stream cancelled): the sim
+    // thread removes them from the field in GrpcServer::processPending().
+    std::vector<int> removals;
 };

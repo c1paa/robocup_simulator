@@ -1,12 +1,10 @@
 """Robot script: the same file runs in the simulator (alone or in a match)
 or on the real robot.
 
-  python examples/main.py                      -> opens its own simulator, just this robot
-  ROBOCUP_SIM=localhost:50051 ROBOCUP_SLOT=red_1 python examples/main.py
-                                               -> plays as red_1 in a match already
-                                                  running (./run_simulator.sh --match simulator/configs/match.json;
-                                                  press Enter in its window to start)
-  ROBOT_BACKEND=hw python examples/main.py     -> real robot
+  python main.py                -> personal: opens its own simulator window
+  python main.py ID=0           -> match: joins the empty simulator started with
+                                   ./run_simulator.sh (ID 0..3 = slot); P starts the game
+  ROBOT_BACKEND=hw python main.py -> real robot
 """
 import time
 
