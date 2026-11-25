@@ -449,6 +449,21 @@ class Simulator:
         self.stop()
 
 
+def _hold_until_sim_closes(hal):
+    """Match mode: the script reached its end without robot.close() -- keep the
+    process (and so the robot) alive until the simulator closes or Ctrl+C, the
+    same as personal mode keeps its window. A crashed script doesn't wait."""
+    if _script_failed or hal._closed or not hal.is_running():
+        return
+    print("[SimRobotHAL] script finished; the robot stays on the field until the "
+          "simulator closes (Ctrl+C to leave).")
+    try:
+        while hal.is_running():
+            time.sleep(0.2)
+    except KeyboardInterrupt:
+        pass
+
+
 def _slot_from_argv():
     """`python main.py ID=2` (or `--id 2`) picks the match slot by number."""
     argv = sys.argv[1:]
@@ -486,7 +501,8 @@ def create_robot(sim=None, slot=None, **add_robot_kwargs):
         sim = Simulator.connect(host or "localhost", int(port))
         hal = sim.join(slot)
         hal._owner = sim
-        atexit.register(hal.close)  # script ended without close(): the robot leaves the field
+        atexit.register(hal.close)  # runs last: the robot leaves the field
+        atexit.register(_hold_until_sim_closes, hal)
         return hal
     sim = Simulator().start()
     hal = sim.add_robot(**add_robot_kwargs)
