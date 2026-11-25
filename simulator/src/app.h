@@ -81,6 +81,7 @@ public:
     // call order starting at 0.
     // Takes robot `id` off the field (its program disconnected). Main thread only.
     void removeRobot(int id);
+    void updateBallIdle(float dt);
 
     int addRobot(const std::string& robotConfigPath,
                  float spawnX = 0.0f, float spawnZ = 0.0f, float spawnYawDeg = 0.0f);
@@ -128,6 +129,7 @@ private:
     // and vice versa. Counted on entry, only while playing.
     int m_scoreYellow = 0, m_scoreBlue = 0;
     int m_ballInGoal = 0;
+    float m_ballIdle = 0.0f; // seconds playing with no robot touching the ball
     int m_nextRobotId = 0; // ids are never reused, even after removeRobot()
 
     // Which m_robots[] index the keyboard (arrows/space/F) currently drives,

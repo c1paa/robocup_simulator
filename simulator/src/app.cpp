@@ -517,6 +517,52 @@ void App::update(float dt)
                   << m_scoreYellow << " : " << m_scoreBlue << " blue" << std::endl;
     }
     m_ballInGoal = side;
+
+    updateBallIdle(dt);
+}
+
+// If no robot has touched the ball for N seconds of play (default 5; 0 turns it
+// off: /physics/ball/idle_reset_s), put it on the nearest control point: the
+// field centre or one of the match spawn points.
+void App::updateBallIdle(float dt)
+{
+    float limit = Config::instance().getFloat("/physics/ball/idle_reset_s", 5.0f);
+    if (limit <= 0.0f || m_grpc->phase() != 1) return;
+
+    glm::vec3 b = m_ball->position();
+    for (auto& e : m_robots) {
+        glm::vec3 p = e.robot->position();
+        float d = std::hypot(b.x - p.x, b.z - p.z);
+        if (d < e.robot->diameter() * 0.5f + m_ball->radius() + 0.015f) { m_ballIdle = 0.0f; return; }
+    }
+    m_ballIdle += dt;
+    if (m_ballIdle < limit) return;
+    m_ballIdle = 0.0f;
+
+    std::vector<glm::vec2> points{{0.0f, 0.0f}};
+    const json& root = Config::instance().root();
+    if (root.contains("match") && root["match"].contains("slots")) {
+        for (auto it = root["match"]["slots"].begin(); it != root["match"]["slots"].end(); ++it) {
+            if (it.value().contains("spawn")) {
+                points.push_back({it.value()["spawn"].value("x", 0.0f) / 1000.0f,
+                                  it.value()["spawn"].value("z", 0.0f) / 1000.0f});
+            }
+        }
+    }
+    const glm::vec2* best = nullptr;
+    float bestD = 1e9f;
+    for (const glm::vec2& pt : points) {
+        bool blocked = false;
+        for (auto& e : m_robots) {
+            glm::vec3 p = e.robot->position();
+            if (std::hypot(pt.x - p.x, pt.y - p.z) < e.robot->diameter() * 0.5f + m_ball->radius() + 0.03f) blocked = true;
+        }
+        float d = std::hypot(pt.x - b.x, pt.y - b.z);
+        if (!blocked && d < bestD) { bestD = d; best = &pt; }
+    }
+    if (!best) return;
+    m_ball->teleport(best->x, best->y);
+    std::cout << "[Ball] Not touched for " << limit << " s -- moved to (" << best->x << ", " << best->y << ")." << std::endl;
 }
 
 void App::render()

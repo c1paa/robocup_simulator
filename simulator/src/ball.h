@@ -23,6 +23,9 @@ public:
     // Direct Bullet handle for the dribbler/kicker force model (same pattern
     // as Physics::world()). The dribbler applies a capture force at the ball's
     // contact point every frame; the kicker applies an impulse.
+    // Puts the ball at rest on the ground at (x, z), metres. Main thread only.
+    void teleport(float x, float z);
+
     btRigidBody* body() const { return m_body.get(); }
 
 private:

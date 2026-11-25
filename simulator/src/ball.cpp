@@ -67,6 +67,21 @@ void Ball::init(Config& cfg, btDiscreteDynamicsWorld* world)
     m_position = glm::vec3(spawnX, spawnY, 0.0f);
 }
 
+void Ball::teleport(float x, float z)
+{
+    if (!m_body) return;
+    btTransform t;
+    t.setIdentity();
+    t.setOrigin(btVector3(x, m_radius + 0.001f, z));
+    m_body->setWorldTransform(t);
+    m_motionState->setWorldTransform(t);
+    m_body->setLinearVelocity(btVector3(0, 0, 0));
+    m_body->setAngularVelocity(btVector3(0, 0, 0));
+    m_body->clearForces();
+    m_body->activate(true);
+    m_position = glm::vec3(x, m_radius + 0.001f, z);
+}
+
 void Ball::syncFromPhysics()
 {
     if (!m_body) return;
