@@ -70,14 +70,14 @@
         "kicker": {
             "coil_resistance": 0.6,
             "coil_inductance": 0.0008,
-            "force_constant": 900,
+            "force_constant": 0.1,
             "armature_mass": 0.015,
             "stroke": 8,
             "spring_constant": 300,
             "damping_coefficient": 5,
             "restitution": 0.3,
             "short_circuit_resistance": 0.1,
-            "debug_impulse": 6.0,
+            "debug_impulse": 0.22,
             "height_offset": 0.0,
             "range": 40,
             "chip_max_angle": 30
