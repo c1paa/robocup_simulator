@@ -17,6 +17,10 @@ public:
     float halfLength()  const { return m_length * 0.5f; }
     float halfWidth()   const { return m_width * 0.5f; }
 
+    // Which goal volume `p` (ball centre, metres) is inside: -1 = left (yellow)
+    // goal, +1 = right (blue) goal, 0 = neither.
+    int goalAt(const glm::vec3& p) const;
+
     float playHalfLength() const { return halfLength() - m_boundaryWidth; }
     float playHalfWidth()  const { return halfWidth()  - m_boundaryWidth; }
 

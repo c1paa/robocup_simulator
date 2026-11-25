@@ -19,7 +19,8 @@ public:
     // Draws `lines` (one string per line, top-down) in a translucent box in
     // the given corner of the window. windowWidth/windowHeight are the
     // current framebuffer size, same as Camera::drawPreview's parameters.
-    void draw(int windowWidth, int windowHeight, const std::vector<std::string>& lines);
+    void draw(int windowWidth, int windowHeight, const std::vector<std::string>& lines,
+              bool topCenter = false);
 
 private:
     unsigned int m_textProgram = 0;

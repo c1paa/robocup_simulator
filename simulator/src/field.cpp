@@ -245,3 +245,17 @@ void Field::drawPenaltyArea(Renderer& r, float bx, float bz, float depth, float 
     // Front line
     drawThickLine(r, {frontX, ly, rightZ}, {frontX, ly, leftZ}, ly, lw, color);
 }
+
+int Field::goalAt(const glm::vec3& p) const
+{
+    if (std::fabs(p.z) > m_goalWidth * 0.5f || p.y > m_goalHeight) return 0;
+    for (float sign : {-1.0f, 1.0f}) {
+        float front = sign * (playHalfLength() + m_goalWallOffset);
+        float back  = front + sign * (m_goalDepth + m_goalWallThickness);
+        float lo = std::min(front, back), hi = std::max(front, back);
+        // Past the goal mouth line (ball centre), up to the back wall.
+        bool pastMouth = sign < 0 ? p.x < front : p.x > front;
+        if (pastMouth && p.x >= lo && p.x <= hi) return (int)sign;
+    }
+    return 0;
+}

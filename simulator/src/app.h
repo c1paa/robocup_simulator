@@ -124,6 +124,10 @@ private:
     // unique_ptr members hold, which stay valid even if the vector itself
     // reallocates when a later addRobot() grows it.
     std::vector<RobotEntry> m_robots;
+    // Score: ball touching a goal volume. Blue scores in the yellow (left) goal
+    // and vice versa. Counted on entry, only while playing.
+    int m_scoreYellow = 0, m_scoreBlue = 0;
+    int m_ballInGoal = 0;
     int m_nextRobotId = 0; // ids are never reused, even after removeRobot()
 
     // Which m_robots[] index the keyboard (arrows/space/F) currently drives,

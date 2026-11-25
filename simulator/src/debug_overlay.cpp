@@ -164,7 +164,7 @@ void DebugOverlay::shutdown()
     m_textProgram = m_boxProgram = 0;
 }
 
-void DebugOverlay::draw(int windowWidth, int windowHeight, const std::vector<std::string>& lines)
+void DebugOverlay::draw(int windowWidth, int windowHeight, const std::vector<std::string>& lines, bool topCenter)
 {
     if (windowWidth <= 0 || windowHeight <= 0 || lines.empty()) return;
     if (!m_textProgram) return; // init() not called / failed
@@ -183,7 +183,8 @@ void DebugOverlay::draw(int windowWidth, int windowHeight, const std::vector<std
 
     float boxW = maxWidth + padding * 2.0f;
     float boxH = lineHeight * (float)lines.size() + padding * 2.0f;
-    float x0 = (float)windowWidth - margin - boxW; // top-right corner
+    float x0 = topCenter ? ((float)windowWidth - boxW) * 0.5f
+                         : (float)windowWidth - margin - boxW; // top-right corner
     float y0 = margin;
 
     glDisable(GL_DEPTH_TEST);

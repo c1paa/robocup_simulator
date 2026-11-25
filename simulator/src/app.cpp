@@ -509,6 +509,14 @@ void App::update(float dt)
         }
     }
     m_grpc->update(dt);
+
+    int side = m_field->goalAt(m_ball->position());
+    if (side != 0 && m_ballInGoal == 0 && m_grpc->phase() == 1) {
+        if (side < 0) ++m_scoreBlue; else ++m_scoreYellow;   // ball in yellow goal = blue goal
+        std::cout << "[Score] Goal in the " << (side < 0 ? "yellow" : "blue") << " goal -- yellow "
+                  << m_scoreYellow << " : " << m_scoreBlue << " blue" << std::endl;
+    }
+    m_ballInGoal = side;
 }
 
 void App::render()
@@ -577,6 +585,12 @@ void App::render()
     }
 
     // ---- Telemetry overlay (L key, active robot only) ----
+    if (m_debugOverlay) {
+        m_debugOverlay->draw(m_width, m_height,
+            { "YELLOW " + std::to_string(m_scoreYellow) + "  :  " + std::to_string(m_scoreBlue) + " BLUE" },
+            true);
+    }
+
     if (m_showTelemetryOverlay && m_debugOverlay && !m_robots.empty()) {
         glViewport(0, 0, m_width, m_height);
 
