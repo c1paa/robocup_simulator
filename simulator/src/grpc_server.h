@@ -4,6 +4,7 @@
 #include <atomic>
 #include <functional>
 #include <map>
+#include <set>
 #include <memory>
 #include <shared_mutex>
 #include <string>
@@ -81,6 +82,10 @@ public:
     // Drops id's binding + marks its SharedState dead. Main thread only.
     void unregisterRobot(int id);
 
+    // The keyboard (arrows/Q/E/Space) is driving robot `id` right now: the
+    // not-playing hold (waiting/paused) must not stomp on it. Main thread only.
+    void setManualControl(int id, bool on) { if (on) m_manual.insert(id); else m_manual.erase(id); }
+
     // Producer side used by SimulatorServiceImpl's constructor -- exposes the
     // same queue drained in update() below.
     AddRobotQueue& addRobotQueue() { return m_addRobotQueue; }
@@ -108,6 +113,7 @@ private:
 
     AddRobotFn m_addRobotFn;
     RemoveRobotFn m_removeRobotFn;
+    std::set<int> m_manual;
     AddRobotQueue m_addRobotQueue;
     std::atomic<bool> m_shutdownRequested{false};
     std::atomic<int> m_phase{1};

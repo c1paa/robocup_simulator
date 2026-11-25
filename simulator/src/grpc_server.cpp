@@ -201,12 +201,14 @@ void GrpcServer::update(float dt)
                 // Not playing (waiting / paused / closing): hold the robot
                 // still, but keep the last command so it applies on resume.
                 state.hasCommand = true;
-                if (binding.robot)    binding.robot->setBodyVelocity(0.0f, 0.0f, 0.0f);
-                if (binding.kicker) {
-                    binding.kicker->setCapacitorOpen(false);
-                    binding.kicker->setKickerOpen(false);
+                if (!m_manual.count(id)) {   // keyboard-driven robot keeps moving
+                    if (binding.robot)    binding.robot->setBodyVelocity(0.0f, 0.0f, 0.0f);
+                    if (binding.kicker) {
+                        binding.kicker->setCapacitorOpen(false);
+                        binding.kicker->setKickerOpen(false);
+                    }
+                    if (binding.dribbler) binding.dribbler->setTargetSpeed(0.0f);
                 }
-                if (binding.dribbler) binding.dribbler->setTargetSpeed(0.0f);
             } else if (state.hasCommand) {
                 if (binding.robot) {
                     binding.robot->setBodyVelocity(state.vx, state.vy, state.omega);

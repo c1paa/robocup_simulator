@@ -350,6 +350,16 @@ void App::handleEvent(const SDL_Event& e)
         if (e.key.keysym.scancode >= SDL_SCANCODE_1 && e.key.keysym.scancode <= SDL_SCANCODE_4) {
             int index = (int)(e.key.keysym.scancode - SDL_SCANCODE_1);
             if (index < (int)m_robots.size()) {
+                if (index != m_activeRobot && m_activeRobot < (int)m_robots.size()) {
+                    // The robot we're leaving must not keep (or repeat) the last
+                    // manual command: stop it and forget the held-key state.
+                    RobotEntry& prev = m_robots[m_activeRobot];
+                    prev.robot->setBodyVelocity(0.0f, 0.0f, 0.0f);
+                    prev.dribbler->setTargetSpeed(0.0f);
+                    prev.lastManualDrive = prev.lastManualStrafe = prev.lastManualTurn = 0.0f;
+                    prev.lastManualDribbleHeld = prev.lastManualKickHeld = false;
+                    m_grpc->setManualControl(prev.id, false);
+                }
                 m_activeRobot = index;
                 std::cout << "[App] Active robot: " << m_robots[m_activeRobot].id << std::endl;
             }
@@ -461,6 +471,8 @@ void App::handleKeyboardInput(const Uint8* keys, float dt)
         active.dribbler->setTargetSpeed(dribbleHeld ? 1.0f : 0.0f);
         active.lastManualDribbleHeld = dribbleHeld;
     }
+
+    m_grpc->setManualControl(active.id, drive != 0.0f || strafe != 0.0f || turn != 0.0f || dribbleHeld);
 
     bool kickHeld = keys[SDL_SCANCODE_F] != 0;
     if (kickHeld && !active.lastManualKickHeld) {
