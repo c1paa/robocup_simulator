@@ -16,7 +16,13 @@ if [ ! -f "$BUILD_DIR/CMakeCache.txt" ]; then
     cmake -S "$SCRIPT_DIR" -B "$BUILD_DIR" -DCMAKE_BUILD_TYPE=Release
 else
     echo "[cmake] Re-configuring..."
-    cmake -S "$SCRIPT_DIR" -B "$BUILD_DIR" -DCMAKE_BUILD_TYPE=Release
+    if ! cmake -S "$SCRIPT_DIR" -B "$BUILD_DIR" -DCMAKE_BUILD_TYPE=Release; then
+        # A stale cache (e.g. after `brew upgrade` changed grpc/openssl) breaks
+        # reconfiguring; a fresh configure works. Downloaded deps are kept.
+        echo "[cmake] Reconfigure failed -- clearing the CMake cache and retrying..."
+        rm -rf "$BUILD_DIR/CMakeCache.txt" "$BUILD_DIR/CMakeFiles"
+        cmake -S "$SCRIPT_DIR" -B "$BUILD_DIR" -DCMAKE_BUILD_TYPE=Release
+    fi
 fi
 
 # -----------------------------------------------------------
