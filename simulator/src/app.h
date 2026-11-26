@@ -82,6 +82,7 @@ public:
     // Takes robot `id` off the field (its program disconnected). Main thread only.
     void removeRobot(int id);
     void updateBallIdle(float dt);
+    void resetGame();   // R: robots to spawn, ball to centre, score 0
 
     int addRobot(const std::string& robotConfigPath,
                  float spawnX = 0.0f, float spawnZ = 0.0f, float spawnYawDeg = 0.0f,

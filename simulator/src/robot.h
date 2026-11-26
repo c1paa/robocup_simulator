@@ -37,6 +37,9 @@ public:
 
     // "blue": blue body + yellow heading line; "yellow": yellow body + blue line.
     void setTeam(const std::string& team);
+
+    // Back to the spawn pose at rest (game reset). Main thread only.
+    void resetToSpawn();
     float velocity() const { return m_velocity; }
     float angularVelocity() const { return m_angularVelocity; }
     float diameter() const { return m_diameter; } // m, for shadow-blob radius etc.
@@ -75,6 +78,8 @@ private:
     float m_wheelSpeed[kOmniWheels]  = {0.0f, 0.0f, 0.0f};
 
     // Dead-reckoning odometry (integrates wheel speeds assuming zero slip)
+    glm::vec3 m_spawnPos{0.0f};
+    float m_spawnYaw = 0.0f;
     float m_odomX = 0.0f;
     float m_odomZ = 0.0f;
     float m_odomYaw = 0.0f;

@@ -335,6 +335,9 @@ void App::handleEvent(const SDL_Event& e)
             e.key.keysym.scancode == SDL_SCANCODE_RGUI) {
             m_cmdHeld = true;
         }
+        if (e.key.keysym.scancode == SDL_SCANCODE_R && !e.key.repeat) {
+            resetGame();
+        }
         if (e.key.keysym.scancode == SDL_SCANCODE_P && !e.key.repeat) {
             int ph = m_grpc->phase();
             if (ph == 1) { m_grpc->setPhase(3); std::cout << "[Match] Paused (P to resume)." << std::endl; }
@@ -526,6 +529,32 @@ void App::update(float dt)
 // If no robot has touched the ball for N seconds of play (default 5; 0 turns it
 // off: /physics/ball/idle_reset_s), put it on the nearest control point: the
 // field centre or one of the match spawn points.
+void App::resetGame()
+{
+    for (auto& e : m_robots) {
+        e.robot->resetToSpawn();
+        e.dribbler->setTargetSpeed(0.0f);
+        e.kicker->setCapacitorOpen(false);
+        e.kicker->setKickerOpen(false);
+        e.lastManualDrive = e.lastManualStrafe = e.lastManualTurn = 0.0f;
+        e.lastManualDribbleHeld = false;
+    }
+    // Ball to the centre; if a robot spawns on top of it (single-robot mode
+    // spawns at the origin) put it just in front of the robot instead.
+    float bx = 0.0f;
+    for (auto& e : m_robots) {
+        glm::vec3 p = e.robot->position();
+        if (std::hypot(p.x, p.z) < e.robot->diameter() * 0.5f + m_ball->radius() + 0.03f) {
+            bx = p.x + e.robot->diameter() * 0.5f + m_ball->radius() + 0.02f;
+        }
+    }
+    m_ball->teleport(bx, 0.0f);
+    m_scoreYellow = m_scoreBlue = 0;
+    m_ballInGoal = 0;
+    m_ballIdle = 0.0f;
+    std::cout << "[Game] Reset: robots at spawn, ball at centre, score 0 : 0." << std::endl;
+}
+
 void App::updateBallIdle(float dt)
 {
     float limit = Config::instance().getFloat("/physics/ball/idle_reset_s", 5.0f);

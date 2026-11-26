@@ -56,6 +56,7 @@ Builds automatically first if the binary is missing. Options:
 - C — toggle the in-window mirror-camera preview overlay
 - L — toggle the telemetry overlay (position/odometry, dribbler RPM, kicker
   capacitor charge, ball position relative to the robot)
+- P — start / pause / resume the game; R — reset the game (robots to spawn, ball to centre, score 0:0)
 - Esc — quit
 
 ## Python client

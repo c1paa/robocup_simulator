@@ -235,9 +235,30 @@ void Robot::init(Config& cfg, btDiscreteDynamicsWorld* world)
 
     m_position = glm::vec3(spawnX, halfH, spawnZ);
     m_yaw = spawnYawRad;
+    m_spawnPos = m_position;
+    m_spawnYaw = spawnYawRad;
     m_odomX = 0.0f;
     m_odomZ = 0.0f;
     m_odomYaw = 0.0f;
+}
+
+void Robot::resetToSpawn()
+{
+    if (!m_body) return;
+    btTransform t;
+    t.setIdentity();
+    t.setOrigin(btVector3(m_spawnPos.x, m_spawnPos.y, m_spawnPos.z));
+    t.setRotation(btQuaternion(btVector3(0.0f, 1.0f, 0.0f), m_spawnYaw));
+    m_body->setWorldTransform(t);
+    m_motionState->setWorldTransform(t);
+    m_body->setLinearVelocity(btVector3(0, 0, 0));
+    m_body->setAngularVelocity(btVector3(0, 0, 0));
+    m_body->clearForces();
+    m_body->activate(true);
+    m_position = m_spawnPos;
+    m_yaw = m_spawnYaw;
+    m_targetVx = m_targetVy = m_targetOmega = 0.0f;
+    m_odomX = m_odomZ = m_odomYaw = 0.0f;
 }
 
 void Robot::setBodyVelocity(float vx, float vy, float omega)
