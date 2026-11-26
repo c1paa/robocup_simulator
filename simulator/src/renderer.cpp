@@ -105,12 +105,37 @@ bool Renderer::init(int width, int height)
     m_shaderProgram = createShaderProgram(DEFAULT_VERT, DEFAULT_FRAG);
     createGridMesh(20.0f, 1.0f);
 
+    m_locProj     = glGetUniformLocation(m_shaderProgram, "uProjection");
+    m_locView     = glGetUniformLocation(m_shaderProgram, "uView");
+    m_locModel    = glGetUniformLocation(m_shaderProgram, "uModel");
+    m_locLightDir = glGetUniformLocation(m_shaderProgram, "uLightDir");
+    m_locAmbient  = glGetUniformLocation(m_shaderProgram, "uAmbient");
+    m_locDiffuse  = glGetUniformLocation(m_shaderProgram, "uDiffuseColor");
+
+    glGenVertexArrays(1, &m_dynVao);
+    glGenBuffers(1, &m_dynVbo);
+    glGenBuffers(1, &m_dynEbo);
+    glBindVertexArray(m_dynVao);
+    glBindBuffer(GL_ARRAY_BUFFER, m_dynVbo);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_dynEbo);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)offsetof(Vertex, position));
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)offsetof(Vertex, normal));
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)offsetof(Vertex, color));
+    glEnableVertexAttribArray(2);
+    glBindVertexArray(0);
+    m_lineBatch.reserve(4096);
+
     std::cout << "[Renderer] Ready." << std::endl;
     return true;
 }
 
 void Renderer::shutdown()
 {
+    if (m_dynVao) glDeleteVertexArrays(1, &m_dynVao);
+    if (m_dynVbo) glDeleteBuffers(1, &m_dynVbo);
+    if (m_dynEbo) glDeleteBuffers(1, &m_dynEbo);
     if (m_gridVAO) glDeleteVertexArrays(1, &m_gridVAO);
     if (m_gridVBO) glDeleteBuffers(1, &m_gridVBO);
     if (m_shaderProgram) glDeleteProgram(m_shaderProgram);
@@ -118,13 +143,14 @@ void Renderer::shutdown()
 
 void Renderer::beginFrame(const glm::mat4& projection, const glm::mat4& view)
 {
+    flushLines();
     m_projection = projection;
     m_view = view;
 }
 
 void Renderer::endFrame()
 {
-    // Nothing to flush — immediate mode drawing for now
+    flushLines();
 }
 
 void Renderer::setLighting(const glm::vec3& direction, const glm::vec3& ambient, const glm::vec3& diffuseColor)
@@ -145,6 +171,7 @@ static void uploadLighting(unsigned int program, const glm::vec3& dir, const glm
 
 void Renderer::drawGrid(float size, float step)
 {
+    flushLines();
     glUseProgram(m_shaderProgram);
 
     glUniformMatrix4fv(glGetUniformLocation(m_shaderProgram, "uProjection"), 1, GL_FALSE, glm::value_ptr(m_projection));
@@ -159,35 +186,34 @@ void Renderer::drawGrid(float size, float step)
 
 void Renderer::drawLine(const glm::vec3& a, const glm::vec3& b, const glm::vec3& color)
 {
-    float vertices[] = {
-        a.x, a.y, a.z, 0.0f, 1.0f, 0.0f, color.r, color.g, color.b,
-        b.x, b.y, b.z, 0.0f, 1.0f, 0.0f, color.r, color.g, color.b,
-    };
+    // Batched: collected here and drawn in one call by flushLines() (before the
+    // next mesh, at endFrame, ...), instead of one GL buffer per line.
+    const glm::vec3 up(0.0f, 1.0f, 0.0f);
+    m_lineBatch.push_back({a, up, color});
+    m_lineBatch.push_back({b, up, color});
+}
 
-    unsigned int vao, vbo;
-    glGenVertexArrays(1, &vao);
-    glGenBuffers(1, &vbo);
-    glBindVertexArray(vao);
-    glBindBuffer(GL_ARRAY_BUFFER, vbo);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
-
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 9 * sizeof(float), (void*)0);
-    glEnableVertexAttribArray(0);
-    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 9 * sizeof(float), (void*)(3 * sizeof(float)));
-    glEnableVertexAttribArray(1);
-    glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, 9 * sizeof(float), (void*)(6 * sizeof(float)));
-    glEnableVertexAttribArray(2);
-
+void Renderer::bindFrameUniforms(const glm::mat4& model)
+{
     glUseProgram(m_shaderProgram);
-    glUniformMatrix4fv(glGetUniformLocation(m_shaderProgram, "uProjection"), 1, GL_FALSE, glm::value_ptr(m_projection));
-    glUniformMatrix4fv(glGetUniformLocation(m_shaderProgram, "uView"),       1, GL_FALSE, glm::value_ptr(m_view));
-    glUniformMatrix4fv(glGetUniformLocation(m_shaderProgram, "uModel"),      1, GL_FALSE, glm::value_ptr(glm::mat4(1.0f)));
-    uploadLighting(m_shaderProgram, m_lightDir, m_ambient, m_diffuseColor);
+    glUniformMatrix4fv(m_locProj,  1, GL_FALSE, glm::value_ptr(m_projection));
+    glUniformMatrix4fv(m_locView,  1, GL_FALSE, glm::value_ptr(m_view));
+    glUniformMatrix4fv(m_locModel, 1, GL_FALSE, glm::value_ptr(model));
+    glUniform3f(m_locLightDir, m_lightDir.x, m_lightDir.y, m_lightDir.z);
+    glUniform3f(m_locAmbient, m_ambient.x, m_ambient.y, m_ambient.z);
+    glUniform3f(m_locDiffuse, m_diffuseColor.x, m_diffuseColor.y, m_diffuseColor.z);
+}
 
-    glDrawArrays(GL_LINES, 0, 2);
-
-    glDeleteVertexArrays(1, &vao);
-    glDeleteBuffers(1, &vbo);
+void Renderer::flushLines()
+{
+    if (m_lineBatch.empty()) return;
+    glBindVertexArray(m_dynVao);
+    glBindBuffer(GL_ARRAY_BUFFER, m_dynVbo);
+    glBufferData(GL_ARRAY_BUFFER, m_lineBatch.size() * sizeof(Vertex), m_lineBatch.data(), GL_STREAM_DRAW);
+    bindFrameUniforms(glm::mat4(1.0f));
+    glDrawArrays(GL_LINES, 0, (int)m_lineBatch.size());
+    glBindVertexArray(0);
+    m_lineBatch.clear();
 }
 
 void Renderer::drawBox(const glm::vec3& halfExtents, const glm::mat4& transform, const glm::vec3& color)
@@ -311,6 +337,7 @@ void Renderer::drawShadowBlob(const glm::vec3& objPos, float objRadius)
     // alpha channel needed) so it correctly darkens the floor, field lines,
     // or anything else already drawn — not just a fixed "shadow color" that
     // would only look right over the green floor.
+    flushLines();
     if (m_lightDir.y >= -0.05f) return; // light ~horizontal or from below: skip, no sane projection
 
     float t = objPos.y / (-m_lightDir.y);
@@ -401,37 +428,17 @@ void Renderer::drawCone(float baseRadius, float height, const glm::mat4& transfo
 void Renderer::drawMesh(const std::vector<Vertex>& vertices, const std::vector<unsigned int>& indices, const glm::mat4& model)
 {
     if (vertices.empty()) return;
+    flushLines();   // keep draw order: lines queued before this mesh come first
 
-    unsigned int vao, vbo, ebo;
-    glGenVertexArrays(1, &vao);
-    glGenBuffers(1, &vbo);
-    glGenBuffers(1, &ebo);
+    glBindVertexArray(m_dynVao);
+    glBindBuffer(GL_ARRAY_BUFFER, m_dynVbo);
+    glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(Vertex), vertices.data(), GL_STREAM_DRAW);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_dynEbo);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(unsigned int), indices.data(), GL_STREAM_DRAW);
 
-    glBindVertexArray(vao);
-    glBindBuffer(GL_ARRAY_BUFFER, vbo);
-    glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(Vertex), vertices.data(), GL_STATIC_DRAW);
-
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(unsigned int), indices.data(), GL_STATIC_DRAW);
-
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)offsetof(Vertex, position));
-    glEnableVertexAttribArray(0);
-    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)offsetof(Vertex, normal));
-    glEnableVertexAttribArray(1);
-    glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)offsetof(Vertex, color));
-    glEnableVertexAttribArray(2);
-
-    glUseProgram(m_shaderProgram);
-    glUniformMatrix4fv(glGetUniformLocation(m_shaderProgram, "uProjection"), 1, GL_FALSE, glm::value_ptr(m_projection));
-    glUniformMatrix4fv(glGetUniformLocation(m_shaderProgram, "uView"),       1, GL_FALSE, glm::value_ptr(m_view));
-    glUniformMatrix4fv(glGetUniformLocation(m_shaderProgram, "uModel"),      1, GL_FALSE, glm::value_ptr(model));
-    uploadLighting(m_shaderProgram, m_lightDir, m_ambient, m_diffuseColor);
-
+    bindFrameUniforms(model);
     glDrawElements(GL_TRIANGLES, (int)indices.size(), GL_UNSIGNED_INT, nullptr);
-
-    glDeleteVertexArrays(1, &vao);
-    glDeleteBuffers(1, &vbo);
-    glDeleteBuffers(1, &ebo);
+    glBindVertexArray(0);
 }
 
 void Renderer::createGridMesh(float size, float step)

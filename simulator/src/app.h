@@ -132,6 +132,7 @@ private:
     int m_scoreYellow = 0, m_scoreBlue = 0;
     int m_ballInGoal = 0;
     float m_ballIdle = 0.0f; // seconds playing with no robot touching the ball
+    size_t m_cameraStart = 0;   // rotating start for the per-frame camera budget
     int m_nextRobotId = 0; // ids are never reused, even after removeRobot()
 
     // Which m_robots[] index the keyboard (arrows/space/F) currently drives,

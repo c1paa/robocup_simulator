@@ -15,6 +15,7 @@
 
 #include <iostream>
 #include <cmath>
+#include <cstdlib>
 #include <sstream>
 #include <iomanip>
 
@@ -133,6 +134,7 @@ int App::addRobot(const std::string& robotConfigPath, float spawnX, float spawnZ
     entry.imu      = std::make_unique<ImuSensor>();
 
     entry.robot->init(entry.config, m_physics->world());
+    // (camera phase set below, after init)
     entry.robot->setTeam(team);
     entry.camera->init(entry.config, entry.robot->mirrorProfile(), entry.robot->cameraHeight(), m_renderer.get());
     entry.lidar->init(entry.config, m_physics->world());
@@ -140,6 +142,7 @@ int App::addRobot(const std::string& robotConfigPath, float spawnX, float spawnZ
     entry.kicker->init(entry.config);
     entry.kicker->setActors(entry.robot.get(), m_ball.get());
     entry.imu->init(entry.config);
+    entry.camera->setPhase(0.5f * (float)(m_robots.size() % 2)); // alternate frames, see Camera::setPhase
 
     m_grpc->registerRobot(id, entry.robot.get(), entry.camera.get(), entry.lidar.get(),
                            entry.dribbler.get(), entry.kicker.get(), entry.imu.get());
@@ -302,12 +305,29 @@ void App::run()
         // Always, even when paused, so AddRobot RPCs never block on a pause.
         m_grpc->processPending();
 
+        Uint64 t0 = SDL_GetPerformanceCounter();
         if (!m_paused) {
             update(dt * m_simulationSpeed);
         }
+        Uint64 t1 = SDL_GetPerformanceCounter();
 
         render();
+        Uint64 t2 = SDL_GetPerformanceCounter();
         SDL_GL_SwapWindow(m_window);
+        Uint64 t3 = SDL_GetPerformanceCounter();
+
+        // Frame-time breakdown, printed every 2 s when ROBOCUP_PERF is set.
+        static bool perf = std::getenv("ROBOCUP_PERF") != nullptr;
+        if (perf) {
+            static double sU = 0, sR = 0, sS = 0; static int n = 0; static Uint64 last = SDL_GetTicks64();
+            double f = 1000.0 / (double)SDL_GetPerformanceFrequency();
+            sU += (t1 - t0) * f; sR += (t2 - t1) * f; sS += (t3 - t2) * f; ++n;
+            if (SDL_GetTicks64() - last >= 2000) {
+                std::cout << "[Perf] " << (n / ((SDL_GetTicks64() - last) / 1000.0)) << " fps | update " << sU / n
+                          << " ms, render " << sR / n << " ms, swap " << sS / n << " ms | robots " << m_robots.size() << std::endl;
+                sU = sR = sS = 0; n = 0; last = SDL_GetTicks64();
+            }
+        }
     }
 }
 
@@ -599,7 +619,18 @@ void App::updateBallIdle(float dt)
 void App::render()
 {
     // ---- Each robot's own mirror-camera pass (offscreen) ----
-    for (auto& entry : m_robots) {
+    // At most N cameras per frame (the rest stay due and go next frame, oldest
+    // first by rotating the start index): four cameras on one frame is a
+    // multi-ten-ms spike and the whole window/physics stutters with it.
+    static const int kMaxCameras = std::max(1, (int)Config::instance().getInt("/camera/max_renders_per_frame", 2));
+    int rendered = 0;
+    size_t nRobots = m_robots.size();
+    for (size_t k = 0; k < nRobots; ++k) {
+        RobotEntry& entry = m_robots[(k + m_cameraStart) % nRobots];
+        if (entry.camera->isDue()) {
+            if (rendered >= kMaxCameras) continue;   // postponed to the next frame
+            ++rendered;
+        }
         Robot* self = entry.robot.get();
         entry.camera->renderView(self->position(), self->orientation(),
             [&](Renderer& r) {
@@ -621,6 +652,7 @@ void App::render()
                 m_ball->render(r);
             });
     }
+    if (nRobots > 0) m_cameraStart = (m_cameraStart + kMaxCameras) % nRobots;
     glViewport(0, 0, m_width, m_height);
 
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);

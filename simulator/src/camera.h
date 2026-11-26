@@ -20,6 +20,11 @@ public:
     // Render robot camera view into m_imageData. drawScene renders the world
     // (field + robot body) with the given Renderer, using whatever
     // projection/view the Renderer currently has set.
+    // Offsets this camera's render cadence by `fraction` (0..1) of a frame
+    // period, so several cameras don't all render on the same frame.
+    void setPhase(float fraction);
+    // True if renderView() would render now (its stream_fps slot has come).
+    bool isDue() const { return std::chrono::steady_clock::now() >= m_nextRender; }
     void renderView(const glm::vec3& robotPos, float robotYaw,
                     const std::function<void(Renderer&)>& drawScene);
 
@@ -83,6 +88,10 @@ private:
 
     // stream_fps gating
     std::chrono::steady_clock::time_point m_lastRender;
+    float m_phase = 0.0f;                  // fraction of a period, see setPhase
+    std::chrono::steady_clock::time_point m_nextRender;
+    bool m_faceUsed[6] = {true, true, true, true, true, true};   // from the LUT (bakeLut)
+    bool m_faceCleared[6] = {false, false, false, false, false, false};
 
     std::mt19937 m_rng{42};
 

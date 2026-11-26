@@ -2,6 +2,7 @@
 #include "config.h"
 #include "renderer.h"
 #include <iostream>
+#include <cstdlib>
 #include <cmath>
 #include <cstring>
 #include <algorithm>
@@ -163,7 +164,7 @@ void Camera::init(Config& cfg, const MirrorProfile& mirror, float cameraHeight, 
     initPreview();
 
     // Force an immediate render on the first frame.
-    m_lastRender = std::chrono::steady_clock::now() - std::chrono::seconds(10);
+    m_nextRender = std::chrono::steady_clock::now();
 
     std::cout << "[Camera] " << m_width << "x" << m_height << " FOV=" << m_fov
               << " cubemap=" << m_cubemapRes << " fps=" << m_streamFps << std::endl;
@@ -249,6 +250,7 @@ void Camera::bakeLut()
     // mirror silhouette circular and the horizontal FOV equal to /camera/fov.
     float aspect = (float)m_height / (float)m_width;
 
+    size_t faceCount[6] = {0, 0, 0, 0, 0, 0};
     glm::vec3 origin(0.0f, m_cameraHeight, 0.0f);
     float baseY = m_mirror.baseHeight();
 
@@ -276,11 +278,21 @@ void Camera::bakeLut()
                 m_lut[idx + 1] = refl.y;
                 m_lut[idx + 2] = refl.z;
                 m_lut[idx + 3] = 1.0f;
+                float ax = std::fabs(refl.x), ay = std::fabs(refl.y), az = std::fabs(refl.z);
+                int face = (ax >= ay && ax >= az) ? (refl.x > 0 ? 0 : 1)
+                         : (ay >= az)             ? (refl.y > 0 ? 2 : 3)
+                                                  : (refl.z > 0 ? 4 : 5);
+                faceCount[face]++;
             } else {
                 m_lut[idx + 3] = 0.0f;
             }
         }
     }
+
+    for (int f = 0; f < 6; f++) m_faceUsed[f] = faceCount[f] > 0 || f == 3;  // keep -Y (floor under the mirror)
+    std::cout << "[Camera] cubemap face use (+X -X +Y -Y +Z -Z):";
+    for (int f = 0; f < 6; f++) std::cout << " " << faceCount[f];
+    std::cout << std::endl;
 
     glGenTextures(1, &m_lutTexture);
     glBindTexture(GL_TEXTURE_2D, m_lutTexture);
@@ -356,16 +368,28 @@ void Camera::initPreview()
     glBindVertexArray(0);
 }
 
+void Camera::setPhase(float fraction)
+{
+    m_phase = std::clamp(fraction, 0.0f, 1.0f);
+    auto period = std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+        std::chrono::duration<float>(1.0f / std::max(m_streamFps, 1.0f)));
+    m_nextRender = std::chrono::steady_clock::now() + std::chrono::duration_cast<std::chrono::steady_clock::duration>(period * m_phase);
+}
+
 void Camera::renderView(const glm::vec3& robotPos, float robotYaw,
                         const std::function<void(Renderer&)>& drawScene)
 {
     auto now = std::chrono::steady_clock::now();
-    float elapsed = std::chrono::duration<float>(now - m_lastRender).count();
-    if (elapsed < 1.0f / m_streamFps) {
+    if (now < m_nextRender) {
         m_frameChanged = false; // reuse last image
         return;
     }
-    m_lastRender = now;
+    // Next slot keeps this camera's phase (so cameras stay staggered across
+    // frames); if we fell behind by a whole period, resync instead of catching up.
+    auto period = std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+        std::chrono::duration<float>(1.0f / std::max(m_streamFps, 1.0f)));
+    m_nextRender += period;
+    if (m_nextRender <= now) m_nextRender = now + std::chrono::duration_cast<std::chrono::steady_clock::duration>(period * m_phase) + period / 2;
     m_frameChanged = true;
 
     // Effective viewpoint in world space (local viewpoint rotated by yaw).
@@ -377,9 +401,23 @@ void Camera::renderView(const glm::vec3& robotPos, float robotYaw,
         robotPos.z - s * vpLocal.x + c * vpLocal.z
     );
 
+    static bool perf = std::getenv("ROBOCUP_PERF") != nullptr;
+    auto t0 = std::chrono::steady_clock::now();
     captureCubemap(vpWorld, drawScene);
+    if (perf) glFinish();
+    auto t1 = std::chrono::steady_clock::now();
     composite(robotYaw);
+    if (perf) glFinish();
+    auto t2 = std::chrono::steady_clock::now();
     readback();
+    auto t3 = std::chrono::steady_clock::now();
+    if (perf) {
+        static double a = 0, b = 0, c2 = 0; static int n = 0;
+        auto ms = [](auto x, auto y) { return std::chrono::duration<double, std::milli>(y - x).count(); };
+        a += ms(t0, t1); b += ms(t1, t2); c2 += ms(t2, t3);
+        if (++n == 120) { std::cout << "[Perf/camera] cubemap " << a / n << " ms, composite " << b / n
+                                    << " ms, readback+flip " << c2 / n << " ms" << std::endl; a = b = c2 = 0; n = 0; }
+    }
 }
 
 void Camera::captureCubemap(const glm::vec3& vp,
@@ -400,10 +438,14 @@ void Camera::captureCubemap(const glm::vec3& vp,
     glViewport(0, 0, m_cubemapRes, m_cubemapRes);
     glBindFramebuffer(GL_FRAMEBUFFER, m_cubemapFbo);
     for (int face = 0; face < 6; face++) {
+        // A face no mirror pixel ever looks at (straight up) is cleared once
+        // and never redrawn: it only matters for edge filtering.
+        if (!m_faceUsed[face] && m_faceCleared[face]) continue;
         glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
                                GL_TEXTURE_CUBE_MAP_POSITIVE_X + face, m_cubemapTexture, 0);
         glClearColor(0.1f, 0.12f, 0.15f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        if (!m_faceUsed[face]) { m_faceCleared[face] = true; continue; }
 
         m_renderer->beginFrame(proj, views[face]);
         drawScene(*m_renderer);

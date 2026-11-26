@@ -43,6 +43,14 @@ public:
 
 private:
     void createGridMesh(float size, float step);
+    void flushLines();                       // draws the batched lines (see drawLine)
+    void bindFrameUniforms(const glm::mat4& model);
+
+    // Persistent buffers reused by every dynamic draw (was: a VAO + VBO(+EBO)
+    // created and destroyed per line/mesh -- thousands per camera frame).
+    unsigned int m_dynVao = 0, m_dynVbo = 0, m_dynEbo = 0;
+    std::vector<Vertex> m_lineBatch;         // 2 vertices per line, world space
+    int m_locProj = -1, m_locView = -1, m_locModel = -1, m_locLightDir = -1, m_locAmbient = -1, m_locDiffuse = -1;
 
     unsigned int m_shaderProgram = 0;
     unsigned int m_gridVAO = 0, m_gridVBO = 0;

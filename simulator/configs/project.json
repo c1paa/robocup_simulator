@@ -54,8 +54,8 @@
         "field": {
             "friction": 0.8,
             "restitution": 0.5,
-            "wall_friction": 0.3,
-            "wall_restitution": 0.4
+            "wall_friction": 0.1,
+            "wall_restitution": 0.95
         },
         "ball": {
             "radius": 21.5,
