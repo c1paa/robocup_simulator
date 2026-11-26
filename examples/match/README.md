@@ -4,7 +4,7 @@ Terminal 1 -- the empty simulator (slots from `simulator/configs/match.json`), p
 
     ./run_simulator.sh
 
-Terminals 2..5 -- the same script, different ID (0 red_1, 1 red_2, 2 blue_1, 3 blue_2):
+Terminals 2..5 -- the same script, different ID (0 yellow_1, 1 yellow_2, 2 blue_1, 3 blue_2):
 
     python examples/main.py ID=0
     python examples/main.py ID=2

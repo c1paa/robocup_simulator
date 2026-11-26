@@ -84,7 +84,8 @@ public:
     void updateBallIdle(float dt);
 
     int addRobot(const std::string& robotConfigPath,
-                 float spawnX = 0.0f, float spawnZ = 0.0f, float spawnYawDeg = 0.0f);
+                 float spawnX = 0.0f, float spawnZ = 0.0f, float spawnYawDeg = 0.0f,
+                 const std::string& team = "");
 
 private:
     bool initSDL();

@@ -80,6 +80,7 @@ struct SharedState
 struct PendingAddRobot
 {
     std::string configPath;
+    std::string team;   // "blue" / "yellow" / "" (default look)
     float spawnX = 0.0f, spawnZ = 0.0f, spawnYawDeg = 0.0f;
 
     std::mutex mtx;

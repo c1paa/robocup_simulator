@@ -1,4 +1,5 @@
 #pragma once
+#include <string>
 
 #include "common.h"
 #include "mirror_profile.h"
@@ -33,6 +34,9 @@ public:
     // Robot state (for gRPC)
     glm::vec3 position() const { return m_position; }
     float orientation() const { return m_yaw; }
+
+    // "blue": blue body + yellow heading line; "yellow": yellow body + blue line.
+    void setTeam(const std::string& team);
     float velocity() const { return m_velocity; }
     float angularVelocity() const { return m_angularVelocity; }
     float diameter() const { return m_diameter; } // m, for shadow-blob radius etc.
@@ -127,6 +131,7 @@ private:
 
     // ---- Colors ----
     glm::vec3 m_bodyColor   = glm::vec3(0.1f, 0.3f, 0.8f);
+    glm::vec3 m_lineColor   = glm::vec3(1.0f, 0.8f, 0.2f); // heading line on top
     glm::vec3 m_wheelColor  = glm::vec3(0.1f, 0.1f, 0.1f);
     glm::vec3 m_mirrorColor = glm::vec3(0.7f, 0.7f, 0.8f);
 };

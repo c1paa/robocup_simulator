@@ -85,8 +85,8 @@ bool App::init(const std::string& configDir)
     // run() -- GrpcServer::update() calls this on the sim/main thread when
     // it drains a queued request. See docs/tasks/multi-robot.md's "Dynamic
     // robot creation" section.
-    m_grpc->setAddRobotHandler([this](const std::string& path, float x, float z, float yawDeg) {
-        return addRobot(path, x, z, yawDeg);
+    m_grpc->setAddRobotHandler([this](const std::string& path, float x, float z, float yawDeg, const std::string& team) {
+        return addRobot(path, x, z, yawDeg, team);
     });
 
     m_grpc->setRemoveRobotHandler([this](int id) { removeRobot(id); });
@@ -95,7 +95,8 @@ bool App::init(const std::string& configDir)
     return true;
 }
 
-int App::addRobot(const std::string& robotConfigPath, float spawnX, float spawnZ, float spawnYawDeg)
+int App::addRobot(const std::string& robotConfigPath, float spawnX, float spawnZ, float spawnYawDeg,
+                  const std::string& team)
 {
     if (!m_physics || !m_renderer || !m_ball || !m_grpc) {
         std::cerr << "[App] addRobot() called before init()." << std::endl;
@@ -132,6 +133,7 @@ int App::addRobot(const std::string& robotConfigPath, float spawnX, float spawnZ
     entry.imu      = std::make_unique<ImuSensor>();
 
     entry.robot->init(entry.config, m_physics->world());
+    entry.robot->setTeam(team);
     entry.camera->init(entry.config, entry.robot->mirrorProfile(), entry.robot->cameraHeight(), m_renderer.get());
     entry.lidar->init(entry.config, m_physics->world());
     entry.dribbler->init(entry.config);

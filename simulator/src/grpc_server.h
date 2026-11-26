@@ -73,7 +73,8 @@ public:
     // that received the request. Returns the new robot's id, or a negative
     // value on failure (e.g. bad config path).
     using AddRobotFn = std::function<int(const std::string& configPath,
-                                          float spawnX, float spawnZ, float spawnYawDeg)>;
+                                          float spawnX, float spawnZ, float spawnYawDeg,
+                                          const std::string& team)>;
     void setAddRobotHandler(AddRobotFn fn) { m_addRobotFn = std::move(fn); }
 
     // Removes robot `id` from the field (its program disconnected). Set by App.

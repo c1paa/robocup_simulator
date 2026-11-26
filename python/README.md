@@ -229,13 +229,13 @@ python main.py ID=0                # terminal 2: the same unchanged script
 python main.py ID=2                # terminal 3
 ```
 
-`ID` picks the slot from `simulator/configs/match.json` (0 red_1, 1 red_2,
+`ID` picks the slot from `simulator/configs/match.json` (0 yellow_1, 1 yellow_2,
 2 blue_1, 3 blue_2; team, robot config and spawn are defined there; slot names
-work too: `ID=red_1`). `create_robot()` joins the running simulator instead of
+work too: `ID=yellow_1`). `create_robot()` joins the running simulator instead of
 opening one; `robot.close()` is the same call. When a program ends (close(),
 crash, Ctrl+C) its robot disappears from the field and the slot is free again.
 Each robot accepts commands only from the program that joined it. Explicit form:
-`Simulator.connect("localhost", 50051).join("red_1")`; another machine:
+`Simulator.connect("localhost", 50051).join("yellow_1")`; another machine:
 `ROBOCUP_SIM=host:port`.
 
 ## Game phases (match controls)

@@ -156,7 +156,7 @@ void GrpcServer::processPending()
             int id = -1;
             std::string message;
             if (m_addRobotFn) {
-                id = m_addRobotFn(req->configPath, req->spawnX, req->spawnZ, req->spawnYawDeg);
+                id = m_addRobotFn(req->configPath, req->spawnX, req->spawnZ, req->spawnYawDeg, req->team);
                 message = (id >= 0) ? "ok" : "addRobot failed (bad config path?)";
             } else {
                 message = "server not ready to add robots yet";

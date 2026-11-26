@@ -276,6 +276,7 @@ grpc::Status SimulatorServiceImpl::Join(grpc::ServerContext* context,
     pending->spawnX = x;
     pending->spawnZ = z;
     pending->spawnYawDeg = yaw;
+    pending->team = team;
     {
         std::lock_guard<std::mutex> lock(m_addRobotQueue.mtx);
         m_addRobotQueue.pending.push_back(pending);

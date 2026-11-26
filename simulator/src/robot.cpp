@@ -438,6 +438,13 @@ void Robot::render(Renderer& renderer)
     }
 }
 
+void Robot::setTeam(const std::string& team)
+{
+    const glm::vec3 blue(0.1f, 0.3f, 0.9f), yellow(1.0f, 0.85f, 0.1f);
+    if (team == "blue")        { m_bodyColor = blue;   m_lineColor = yellow; }
+    else if (team == "yellow") { m_bodyColor = yellow; m_lineColor = blue; }
+}
+
 void Robot::renderBody(Renderer& renderer)
 {
     float radius = m_diameter * 0.5f;
@@ -455,7 +462,7 @@ void Robot::renderBody(Renderer& renderer)
     {
         glm::vec3 topCenter = model * glm::vec4(0.0f, bodyHalf, 0.0f, 1.0f);
         glm::vec3 topFront  = model * glm::vec4(radius, bodyHalf, 0.0f, 1.0f);
-        renderer.drawLine(topCenter, topFront, glm::vec3(1.0f, 0.8f, 0.2f));
+        renderer.drawLine(topCenter, topFront, m_lineColor);
     }
 
     // ---- Wheels (evenly spaced, vertical disks, offset by angle_offset) ----
